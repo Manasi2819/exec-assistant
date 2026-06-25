@@ -1,0 +1,132 @@
+version: "3.9"
+
+services:
+  # ──────────────────────────────────────────
+  # PostgreSQL — Primary database
+  # ──────────────────────────────────────────
+  postgres:
+    image: postgres:16-alpine
+    container_name: exec_ai_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-execai}
+      POSTGRES_USER: ${POSTGRES_USER:-execai}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-execai_dev_password}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./backend/sql/init.sql:/docker-entrypoint-initdb.d/init.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-execai}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ──────────────────────────────────────────
+  # Redis — Cache, session state, task queues
+  # ──────────────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    container_name: exec_ai_redis
+    restart: unless-stopped
+    command: redis-server --appendonly yes
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ──────────────────────────────────────────
+  # FastAPI Backend — Agent orchestration
+  # ──────────────────────────────────────────
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: exec_ai_backend
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-execai}:${POSTGRES_PASSWORD:-execai_dev_password}@postgres:5432/${POSTGRES_DB:-execai}
+      REDIS_URL: redis://redis:6379/0
+      FAISS_INDEX_PATH: /app/data/faiss
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./backend:/app
+      - faiss_data:/app/data/faiss
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+
+  # ──────────────────────────────────────────
+  # Next.js Frontend
+  # ──────────────────────────────────────────
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile.dev
+    container_name: exec_ai_frontend
+    restart: unless-stopped
+    environment:
+      NEXT_PUBLIC_API_URL: http://localhost:8000
+      NEXT_PUBLIC_APP_NAME: "Executive AI Assistant"
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+      - /app/.next
+    depends_on:
+      - backend
+
+  # ──────────────────────────────────────────
+  # n8n — Workflow automation
+  # ──────────────────────────────────────────
+  n8n:
+    image: n8nio/n8n:latest
+    container_name: exec_ai_n8n
+    restart: unless-stopped
+    environment:
+      N8N_BASIC_AUTH_ACTIVE: "true"
+      N8N_BASIC_AUTH_USER: ${N8N_USER:-admin}
+      N8N_BASIC_AUTH_PASSWORD: ${N8N_PASSWORD:-admin123}
+      N8N_HOST: localhost
+      N8N_PORT: 5678
+      N8N_PROTOCOL: http
+      WEBHOOK_URL: http://localhost:5678/
+      GENERIC_TIMEZONE: Asia/Kolkata
+      DB_TYPE: postgresdb
+      DB_POSTGRESDB_DATABASE: ${POSTGRES_DB:-execai}
+      DB_POSTGRESDB_HOST: postgres
+      DB_POSTGRESDB_PORT: 5432
+      DB_POSTGRESDB_USER: ${POSTGRES_USER:-execai}
+      DB_POSTGRESDB_PASSWORD: ${POSTGRES_PASSWORD:-execai_dev_password}
+      DB_POSTGRESDB_SCHEMA: n8n
+    ports:
+      - "5678:5678"
+    volumes:
+      - n8n_data:/home/node/.n8n
+      - ./n8n/workflows:/home/node/.n8n/workflows
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+volumes:
+  postgres_data:
+  redis_data:
+  faiss_data:
+  n8n_data:

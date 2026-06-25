@@ -1,0 +1,78 @@
+{
+  "name": "Transcript → MoM → Follow-Up",
+  "nodes": [
+    {
+      "parameters": { "httpMethod": "POST", "path": "zoom-webhook" },
+      "name": "Zoom Recording Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "position": [240, 200]
+    },
+    {
+      "parameters": { "httpMethod": "POST", "path": "teams-transcript" },
+      "name": "Teams Transcript Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "position": [240, 400]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://backend:8000/api/v1/webhooks/zoom",
+        "sendBody": true,
+        "bodyParameters": { "parameters": [{ "name": "=body", "value": "={{ $json }}" }] }
+      },
+      "name": "Process Zoom Transcript",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [480, 200]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://backend:8000/api/v1/agents/transcript/ingest",
+        "sendBody": true
+      },
+      "name": "Process Teams Transcript",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [480, 400]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://backend:8000/api/v1/mom/generate",
+        "sendBody": true
+      },
+      "name": "Generate MoM",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [720, 300]
+    },
+    {
+      "parameters": {
+        "resume": "webhook",
+        "options": {}
+      },
+      "name": "Wait for MoM Approval",
+      "type": "n8n-nodes-base.wait",
+      "position": [960, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=http://backend:8000/api/v1/followup/post-meeting",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [{ "name": "mom_id", "value": "={{ $json.mom_id }}" }]
+        }
+      },
+      "name": "Generate Follow-Up Draft",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [1200, 300]
+    }
+  ],
+  "connections": {
+    "Zoom Recording Webhook": { "main": [[{ "node": "Process Zoom Transcript", "type": "main", "index": 0 }]] },
+    "Teams Transcript Webhook": { "main": [[{ "node": "Process Teams Transcript", "type": "main", "index": 0 }]] },
+    "Process Zoom Transcript": { "main": [[{ "node": "Generate MoM", "type": "main", "index": 0 }]] },
+    "Process Teams Transcript": { "main": [[{ "node": "Generate MoM", "type": "main", "index": 0 }]] },
+    "Generate MoM": { "main": [[{ "node": "Wait for MoM Approval", "type": "main", "index": 0 }]] },
+    "Wait for MoM Approval": { "main": [[{ "node": "Generate Follow-Up Draft", "type": "main", "index": 0 }]] }
+  }
+}

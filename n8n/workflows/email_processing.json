@@ -1,0 +1,70 @@
+{
+  "name": "Email Processing Pipeline",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "gmail-push",
+        "responseMode": "responseNode"
+      },
+      "name": "Gmail Pub/Sub Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "position": [240, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=http://backend:8000/api/v1/webhooks/gmail",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [{ "name": "message", "value": "={{ $json.message }}" }]
+        }
+      },
+      "name": "Forward to Email Agent",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [460, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "string": [{ "value1": "={{ $json.email_category }}", "value2": "meeting_request" }]
+        }
+      },
+      "name": "Is Meeting Request?",
+      "type": "n8n-nodes-base.if",
+      "position": [680, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=http://backend:8000/api/v1/agents/meeting-prep/generate",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [{ "name": "meeting_title", "value": "={{ $json.intent.agenda }}" }]
+        }
+      },
+      "name": "Generate Meeting Brief",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [900, 200]
+    },
+    {
+      "parameters": {
+        "respond": "immediately",
+        "responseBody": "={{ { status: 'ok' } }}"
+      },
+      "name": "Respond OK",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "position": [900, 400]
+    }
+  ],
+  "connections": {
+    "Gmail Pub/Sub Webhook": { "main": [[{ "node": "Forward to Email Agent", "type": "main", "index": 0 }]] },
+    "Forward to Email Agent": { "main": [[{ "node": "Is Meeting Request?", "type": "main", "index": 0 }]] },
+    "Is Meeting Request?": {
+      "main": [
+        [{ "node": "Generate Meeting Brief", "type": "main", "index": 0 }],
+        [{ "node": "Respond OK", "type": "main", "index": 0 }]
+      ]
+    }
+  }
+}

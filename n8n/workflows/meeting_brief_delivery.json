@@ -1,0 +1,62 @@
+{
+  "name": "Meeting Brief Delivery",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": { "interval": [{ "field": "cronExpression", "expression": "*/15 * * * *" }] }
+      },
+      "name": "Every 15 Minutes",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "position": [240, 300]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "http://backend:8000/api/v1/meetings/upcoming?window=75min"
+      },
+      "name": "Fetch Upcoming Meetings",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [460, 300]
+    },
+    {
+      "parameters": {},
+      "name": "Split Into Items",
+      "type": "n8n-nodes-base.splitInBatches",
+      "position": [680, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "string": [{ "value1": "={{ $json.brief_status }}", "value2": "pending" }]
+        }
+      },
+      "name": "Brief Not Yet Ready?",
+      "type": "n8n-nodes-base.if",
+      "position": [900, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=http://backend:8000/api/v1/agents/meeting-prep/generate",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            { "name": "meeting_id", "value": "={{ $json.id }}" },
+            { "name": "meeting_title", "value": "={{ $json.title }}" },
+            { "name": "participants", "value": "={{ $json.participants }}" },
+            { "name": "meeting_datetime", "value": "={{ $json.start_time }}" }
+          ]
+        }
+      },
+      "name": "Generate Brief",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [1120, 200]
+    }
+  ],
+  "connections": {
+    "Every 15 Minutes": { "main": [[{ "node": "Fetch Upcoming Meetings", "type": "main", "index": 0 }]] },
+    "Fetch Upcoming Meetings": { "main": [[{ "node": "Split Into Items", "type": "main", "index": 0 }]] },
+    "Split Into Items": { "main": [[{ "node": "Brief Not Yet Ready?", "type": "main", "index": 0 }]] },
+    "Brief Not Yet Ready?": { "main": [[{ "node": "Generate Brief", "type": "main", "index": 0 }], []] }
+  }
+}

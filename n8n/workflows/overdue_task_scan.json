@@ -1,0 +1,67 @@
+{
+  "name": "Daily Overdue Task Scan",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": { "interval": [{ "field": "cronExpression", "expression": "0 9 * * 1-5" }] }
+      },
+      "name": "Daily Trigger (9 AM Mon-Fri)",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "position": [240, 300]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "http://backend:8000/api/v1/action-items?status=pending"
+      },
+      "name": "Fetch Open Tasks",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [460, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://backend:8000/api/v1/tasks/scan-overdue",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [{ "name": "tasks", "value": "={{ $json }}" }]
+        }
+      },
+      "name": "Scan Overdue",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [680, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "number": [{ "value1": "={{ $json.overdue_count }}", "operation": "larger", "value2": 0 }]
+        }
+      },
+      "name": "Any Overdue?",
+      "type": "n8n-nodes-base.if",
+      "position": [900, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://backend:8000/api/v1/pipeline/trigger",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            { "name": "trigger_type", "value": "scheduled_reminder" },
+            { "name": "payload", "value": "={{ { overdue_tasks: $json.tasks.filter(t => t.status === 'overdue') } }}" }
+          ]
+        }
+      },
+      "name": "Dispatch Overdue Notifications",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [1120, 200]
+    }
+  ],
+  "connections": {
+    "Daily Trigger (9 AM Mon-Fri)": { "main": [[{ "node": "Fetch Open Tasks", "type": "main", "index": 0 }]] },
+    "Fetch Open Tasks": { "main": [[{ "node": "Scan Overdue", "type": "main", "index": 0 }]] },
+    "Scan Overdue": { "main": [[{ "node": "Any Overdue?", "type": "main", "index": 0 }]] },
+    "Any Overdue?": { "main": [[{ "node": "Dispatch Overdue Notifications", "type": "main", "index": 0 }], []] }
+  }
+}
