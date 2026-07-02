@@ -26,7 +26,6 @@ from __future__ import annotations
 from typing import Literal
 
 from langgraph.graph import StateGraph, END, START
-from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 
 from app.models.state import AgentState
 from app.agents.email_agent import email_classification_node
@@ -272,6 +271,7 @@ async def get_compiled_graph():
 
     try:
         # Phase 2: real PostgreSQL checkpointing
+        from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
         saver = await AsyncPostgresSaver.from_conn_string(
             settings.database_url_sync
         )
