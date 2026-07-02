@@ -2,18 +2,20 @@
  * frontend/lib/api.ts
  *
  * Centralized API client for the Executive AI Assistant backend.
- * All errors are logged to the console with full context so you can
- * trace them in the browser DevTools console or Next.js terminal output.
+ * All errors are logged to the console with full context.
  *
- * Endpoint map (matches actual backend schemas):
- *   GET  /api/v1/emails                       → fetchEmails
- *   POST /api/v1/agents/email/ingest          → classifyEmail
- *   POST /api/v1/agents/reply/draft           → generateReplyDraft
- *   GET  /api/v1/meetings                     → fetchMeetings
- *   POST /api/v1/agents/meeting-prep/generate → generateMeetingBrief
- *   GET  /api/v1/action-items                 → fetchActionItems
- *   POST /api/v1/pipeline/trigger             → triggerPipeline
- *   POST /api/v1/mom/generate                 → generateMoM
+ * Endpoint map:
+ *   GET  /api/v1/emails                          → fetchEmails
+ *   GET  /api/v1/emails?section=urgent_high      → fetchEmailsBySection
+ *   GET  /api/v1/emails/threads                  → fetchEmailThreads
+ *   GET  /api/v1/emails/threads/:key             → fetchThreadDetail
+ *   POST /api/v1/agents/email/ingest             → classifyEmail (legacy)
+ *   POST /api/v1/agents/email/analyze            → analyzeEmail (full pipeline)
+ *   POST /api/v1/agents/reply/draft              → generateReplyDraft
+ *   GET  /api/v1/meetings                        → fetchMeetings
+ *   POST /api/v1/agents/meeting-prep/generate    → generateMeetingBrief
+ *   GET  /api/v1/action-items                    → fetchActionItems
+ *   POST /api/v1/pipeline/trigger                → triggerPipeline
  */
 
 const API_BASE = "http://localhost:8000/api/v1";
@@ -32,20 +34,104 @@ function logSuccess(label: string, data: unknown) {
   console.log(`[ExecAI API] ✅ ${label}`, data);
 }
 
-// ── Types matching the actual backend Pydantic schemas ──────────────────────
+// ── Types matching the backend Pydantic schemas ───────────────────────────────
+
+export type PriorityLevel = "urgent" | "high" | "medium" | "low" | "spam";
+export type EmailType =
+  | "meeting_request" | "follow_up" | "action_required" | "approval_request"
+  | "escalation" | "client_query" | "internal_update" | "daily_project_update"
+  | "weekly_report" | "fyi" | "reminder" | "invoice_finance" | "hr_communication"
+  | "security_notification" | "system_alert" | "newsletter" | "marketing_email" | "spam";
+
+export type OrgType = "internal" | "client" | "vendor" | "partner" | "recruiter" | "government" | "unknown" | "personal_email";
+export type DomainTrust = "trusted" | "known_client" | "known_vendor" | "personal" | "unknown" | "suspicious";
+export type RelationshipStrength =
+  | "ceo" | "direct_manager" | "client" | "reporting_manager"
+  | "frequent_collaborator" | "vendor" | "unknown" | "never_contacted";
+
+export interface SenderProfile {
+  orgType: OrgType;
+  domain: string;
+  domainTrust: DomainTrust;
+  relationshipStrength: RelationshipStrength;
+  isNewSender: boolean;
+  interactionCount: number;
+  lastInteractionDaysAgo?: number;
+  newSenderCategory?: string;
+  trustScore: number;
+}
+
+export interface ExtractedEntities {
+  meetingDate?: string;
+  meetingTime?: string;
+  meetingLink?: string;
+  agenda?: string;
+  participants?: string[];
+  location?: string;
+  preparationRequired?: string[];
+  documentsToReview?: string[];
+  deadlines?: string[];
+  actionItems?: string[];
+  approvalsRequired?: string[];
+  projectName?: string;
+  clientName?: string;
+  departmentsInvolved?: string[];
+  riskLevel?: "low" | "medium" | "high" | "critical";
+  // Attendee escalation
+  attendeeRequested?: boolean;
+  attendeeRequestedBy?: string;
+  attendeeMeetingTime?: string;
+  delegateSuggestions?: string[];
+}
 
 export interface Email {
   id: string;
   sender: string;
   senderName?: string;
+  senderInitials?: string;
   subject: string;
   body?: string;
   preview?: string;
   category?: string;
+  emailType?: EmailType;
   priority?: string;
+  priorityLevel?: PriorityLevel;
+  priorityScore?: number;
   confidence?: number;
   received_at?: string;
   time?: string;
+  isThread?: boolean;
+  threadId?: string;
+  threadGroupKey?: string;
+  senderProfile?: SenderProfile;
+  entities?: ExtractedEntities;
+  onLineSummary?: string;
+  isSpam?: boolean;
+  spamSignals?: string[];
+  attendeeEscalation?: boolean;
+}
+
+export interface EmailThread {
+  threadGroupKey: string;
+  projectName: string;
+  threadSubjectPattern: string;
+  emailCount: number;
+  lastUpdated: string;
+  participantList: string[];
+  overallStatus: "on_track" | "at_risk" | "blocked" | "completed";
+  completedItems: string[];
+  pendingItems: string[];
+  blockers: string[];
+  executiveSummary: string;
+  hasAttendeeRequest: boolean;
+  attendeeRequestDetails?: string;
+  priorityLevel: PriorityLevel;
+  emailIds: string[];
+}
+
+export interface ThreadDetail {
+  summary: EmailThread;
+  emails: Email[];
 }
 
 /** Matches EmailIngestResponse from schemas.py */
@@ -80,15 +166,103 @@ export interface Meeting {
   id: string;
   title: string;
   start_time: string;
+  date?: string;
   time?: string;
   duration_min?: number;
   participants: string[];
+  optional_participants?: string[];
   brief_status?: string;
   agenda_items?: string[];
   previous_meetings?: string[];
   source?: string;
   conflict?: boolean;
+  delegated?: boolean;
+  delegated_to?: string | null;
+  delegation_notes?: string;
+  location?: string;
+  meeting_link?: string;
+  priority?: "low" | "medium" | "high" | "critical";
+  description?: string;
+  organizer_notes?: string;
+  col?: number;
+  row?: number;
+  color?: string;
 }
+
+export interface CalendarSuggestion {
+  id: string;
+  meeting_id: string;
+  type: "reschedule" | "move_earlier" | "move_later" | "delegate" | "shorten" | "extend"
+    | "merge" | "conflict_resolve" | "add_attendee" | "remove_attendee" | "convert_online" | "brief_ready";
+  title: string;
+  rationale: string;
+  impact: string;
+  priority: "high" | "medium" | "low";
+  params: Record<string, unknown>;
+  status: "active" | "approved" | "dismissed";
+  icon: string;
+  badge_type: "conflict" | "success" | "info" | "warning";
+}
+
+export interface CalendarConflict {
+  id: string;
+  meeting_a_id: string;
+  meeting_a_title: string;
+  meeting_b_id: string;
+  meeting_b_title: string;
+  overlap_minutes: number;
+  suggested_resolution: string;
+  resolution_type: string;
+}
+
+export interface DelegateCandidate {
+  id: string;
+  name: string;
+  role: string;
+  department: string;
+  availability: number;
+  expertise: number;
+  workload: number;
+  reason: string;
+}
+
+export interface MeetingPatch {
+  title?: string;
+  date?: string;
+  time?: string;
+  duration_min?: number;
+  description?: string;
+  agenda_text?: string;
+  location?: string;
+  meeting_link?: string;
+  participants?: string[];
+  optional_participants?: string[];
+  organizer_notes?: string;
+  priority?: string;
+}
+
+export interface DelegateRequest {
+  delegate_name: string;
+  delegate_id?: string;
+  delegation_notes?: string;
+  transfer_ownership?: boolean;
+}
+
+export interface CreateMeetingRequest {
+  title: string;
+  date: string;
+  time: string;
+  duration_min?: number;
+  participants?: string[];
+  optional_participants?: string[];
+  location?: string;
+  meeting_link?: string;
+  description?: string;
+  agenda_items?: string[];
+  priority?: string;
+  organizer_notes?: string;
+}
+
 
 /** Matches MeetingBriefResponse from schemas.py */
 export interface MeetingBrief {
@@ -131,25 +305,58 @@ export interface PipelineResult {
 
 // ── Email Endpoints ─────────────────────────────────────────────────────────
 
-export async function fetchEmails(category?: string): Promise<Email[]> {
+export async function fetchEmails(options?: {
+  section?: "urgent_high" | "medium" | "low" | "spam";
+  category?: string;
+  includeThreads?: boolean;
+}): Promise<Email[]> {
   try {
-    const url = category
-      ? `${API_BASE}/emails?category=${encodeURIComponent(category)}`
-      : `${API_BASE}/emails`;
+    const params = new URLSearchParams();
+    if (options?.section) params.set("section", options.section);
+    if (options?.category) params.set("category", options.category);
+    if (options?.includeThreads) params.set("include_threads", "true");
+
+    const url = `${API_BASE}/emails${params.toString() ? "?" + params.toString() : ""}`;
     const res = await fetch(url);
     if (!res.ok) throw new Error(`HTTP ${res.status} ${res.statusText}`);
     const data = await res.json();
-    logSuccess("fetchEmails", { count: data.length, category });
+    logSuccess("fetchEmails", { count: data.length, ...options });
     return data;
   } catch (err) {
-    logError("fetchEmails", err, { category });
+    logError("fetchEmails", err, options);
     return [];
+  }
+}
+
+export async function fetchEmailThreads(): Promise<EmailThread[]> {
+  try {
+    const res = await fetch(`${API_BASE}/emails/threads`);
+    if (!res.ok) throw new Error(`HTTP ${res.status} ${res.statusText}`);
+    const data = await res.json();
+    logSuccess("fetchEmailThreads", { count: data.length });
+    return data;
+  } catch (err) {
+    logError("fetchEmailThreads", err);
+    return [];
+  }
+}
+
+export async function fetchThreadDetail(threadGroupKey: string): Promise<ThreadDetail | null> {
+  try {
+    const res = await fetch(`${API_BASE}/emails/threads/${threadGroupKey}`);
+    if (!res.ok) throw new Error(`HTTP ${res.status} ${res.statusText}`);
+    const data = await res.json();
+    logSuccess("fetchThreadDetail", { threadGroupKey, emailCount: data.emails?.length });
+    return data;
+  } catch (err) {
+    logError("fetchThreadDetail", err, { threadGroupKey });
+    return null;
   }
 }
 
 /**
  * Classify an email via POST /api/v1/agents/email/ingest
- * Matches EmailIngestRequest schema.
+ * Legacy endpoint — use analyzeEmail for the full 6-stage pipeline.
  */
 export async function classifyEmail(email: {
   sender: string;
@@ -158,7 +365,7 @@ export async function classifyEmail(email: {
   received_at?: string;
 }): Promise<ClassifyResult | null> {
   try {
-    console.log("[ExecAI API] 🔄 classifyEmail — calling Gemini AI...", { subject: email.subject });
+    console.log("[ExecAI API] 🔄 classifyEmail — calling AI...", { subject: email.subject });
     const payload = {
       message_id: `msg_${Date.now()}`,
       thread_id: `thread_${Date.now()}`,
@@ -188,8 +395,48 @@ export async function classifyEmail(email: {
 }
 
 /**
+ * Full 6-stage Email Intelligence Pipeline.
+ * POST /api/v1/agents/email/analyze
+ */
+export async function analyzeEmail(email: {
+  sender: string;
+  subject: string;
+  body: string;
+  thread_id?: string;
+  received_at?: string;
+}): Promise<ClassifyResult | null> {
+  try {
+    console.log("[ExecAI API] 🔄 analyzeEmail — running 6-stage intelligence pipeline...", { subject: email.subject });
+    const payload = {
+      message_id: `msg_${Date.now()}`,
+      thread_id: email.thread_id ?? `thread_${Date.now()}`,
+      sender: email.sender,
+      recipients: ["user@company.com"],
+      subject: email.subject,
+      body: email.body,
+      received_at: email.received_at ?? new Date().toISOString(),
+      source: "gmail",
+    };
+    const res = await fetch(`${API_BASE}/agents/email/analyze`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    if (!res.ok) {
+      const errText = await res.text();
+      throw new Error(`HTTP ${res.status} — ${errText}`);
+    }
+    const data = await res.json();
+    logSuccess("analyzeEmail", data);
+    return data;
+  } catch (err) {
+    logError("analyzeEmail", err, { subject: email.subject });
+    return null;
+  }
+}
+
+/**
  * Generate a reply draft via POST /api/v1/agents/reply/draft
- * Matches ReplyDraftRequest schema.
  */
 export async function generateReplyDraft(email: {
   email_id: string;
@@ -198,7 +445,7 @@ export async function generateReplyDraft(email: {
   user_name?: string;
 }): Promise<ReplyDraft | null> {
   try {
-    console.log("[ExecAI API] 🔄 generateReplyDraft — calling Gemini AI...", { email_id: email.email_id });
+    console.log("[ExecAI API] 🔄 generateReplyDraft — calling AI...", { email_id: email.email_id });
     const payload = {
       email_id: email.email_id,
       thread_context: [email.body],
@@ -237,10 +484,127 @@ export async function fetchMeetings(): Promise<Meeting[]> {
   }
 }
 
-/**
- * Generate a meeting brief via POST /api/v1/agents/meeting-prep/generate
- * Matches MeetingPrepRequest schema.
- */
+export async function createMeeting(data: CreateMeetingRequest): Promise<Meeting | null> {
+  try {
+    const res = await fetch(`${API_BASE}/meetings`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(data),
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const result: Meeting = await res.json();
+    logSuccess("createMeeting", result);
+    return result;
+  } catch (err) {
+    logError("createMeeting", err, { title: data.title });
+    return null;
+  }
+}
+
+export async function updateMeeting(meetingId: string, patch: MeetingPatch): Promise<Meeting | null> {
+  try {
+    const res = await fetch(`${API_BASE}/meetings/${meetingId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(patch),
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const result: Meeting = await res.json();
+    logSuccess("updateMeeting", result);
+    return result;
+  } catch (err) {
+    logError("updateMeeting", err, { meetingId });
+    return null;
+  }
+}
+
+export async function rescheduleMeeting(meetingId: string, newDate: string, newTime: string, newCol?: number, newRow?: number): Promise<Meeting | null> {
+  try {
+    const res = await fetch(`${API_BASE}/meetings/${meetingId}/reschedule`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ new_date: newDate, new_time: newTime, new_col: newCol, new_row: newRow }),
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const result: Meeting = await res.json();
+    logSuccess("rescheduleMeeting", result);
+    return result;
+  } catch (err) {
+    logError("rescheduleMeeting", err, { meetingId });
+    return null;
+  }
+}
+
+export async function delegateMeeting(meetingId: string, req: DelegateRequest): Promise<unknown> {
+  try {
+    const res = await fetch(`${API_BASE}/meetings/${meetingId}/delegate`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(req),
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const result = await res.json();
+    logSuccess("delegateMeeting", result);
+    return result;
+  } catch (err) {
+    logError("delegateMeeting", err, { meetingId });
+    return null;
+  }
+}
+
+export async function fetchCalendarSuggestions(): Promise<CalendarSuggestion[]> {
+  try {
+    const res = await fetch(`${API_BASE}/meetings/suggestions/all`);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data: CalendarSuggestion[] = await res.json();
+    logSuccess("fetchCalendarSuggestions", { count: data.length });
+    return data;
+  } catch (err) {
+    logError("fetchCalendarSuggestions", err);
+    return [];
+  }
+}
+
+export async function approveSuggestion(meetingId: string, suggestionId: string, params?: Record<string, unknown>): Promise<unknown> {
+  try {
+    const res = await fetch(`${API_BASE}/meetings/${meetingId}/approve-suggestion`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ suggestion_id: suggestionId, params }),
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const result = await res.json();
+    logSuccess("approveSuggestion", result);
+    return result;
+  } catch (err) {
+    logError("approveSuggestion", err, { meetingId, suggestionId });
+    return null;
+  }
+}
+
+export async function dismissSuggestion(suggestionId: string): Promise<void> {
+  try {
+    await fetch(`${API_BASE}/meetings/suggestions/${suggestionId}/dismiss`, { method: "POST" });
+  } catch (err) {
+    logError("dismissSuggestion", err, { suggestionId });
+  }
+}
+
+export async function fetchDelegateRecommendations(meetingId: string): Promise<DelegateCandidate[]> {
+  try {
+    const res = await fetch(`${API_BASE}/meetings/${meetingId}/delegates`);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data: DelegateCandidate[] = await res.json();
+    logSuccess("fetchDelegateRecommendations", { meetingId, count: data.length });
+    return data;
+  } catch (err) {
+    logError("fetchDelegateRecommendations", err, { meetingId });
+    return [];
+  }
+}
+
+
+
 export async function generateMeetingBrief(meeting: {
   meeting_id: string;
   meeting_title: string;
@@ -250,7 +614,7 @@ export async function generateMeetingBrief(meeting: {
   previous_meetings?: string[];
 }): Promise<MeetingBrief | null> {
   try {
-    console.log("[ExecAI API] 🔄 generateMeetingBrief — calling Gemini AI...", { title: meeting.meeting_title });
+    console.log("[ExecAI API] 🔄 generateMeetingBrief — calling AI...", { title: meeting.meeting_title });
     const calendarDescription = meeting.agenda_items?.join("; ") ?? "";
     const emailContext = meeting.previous_meetings?.join("\n") ?? "";
     const payload = {
@@ -297,10 +661,6 @@ export async function fetchActionItems(): Promise<ActionItem[]> {
 
 // ── Pipeline Trigger ────────────────────────────────────────────────────────
 
-/**
- * Trigger the LangGraph orchestration pipeline.
- * POST /api/v1/pipeline/trigger
- */
 export async function triggerPipeline(
   triggerType: string,
   payload: Record<string, unknown>
@@ -341,7 +701,7 @@ export async function generateMoM(data: {
   source: string;
 }): Promise<unknown> {
   try {
-    console.log("[ExecAI API] 🔄 generateMoM — calling Gemini AI...", { title: data.meeting_title });
+    console.log("[ExecAI API] 🔄 generateMoM — calling AI...", { title: data.meeting_title });
     const res = await fetch(`${API_BASE}/mom/generate`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },

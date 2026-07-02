@@ -1,661 +1,1003 @@
 "use client";
-import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { TopBar } from "@/components/layout/TopBar";
-import { ToastContainer } from "@/components/ui/ToastContainer";
-import { useToast } from "@/hooks/useToast";
-import {
-  fetchEmails,
-  fetchMeetings,
-  triggerPipeline,
-  type Email,
-  type Meeting,
-  type PipelineResult,
-} from "@/lib/api";
+import { useEffect, useState, useRef } from "react";
 
-interface PriorityAction {
-  id: string;
-  type: string;
-  typeIcon: string;
-  confidence: number;
-  confidenceColor: string;
-  regarding: string;
-  from: string;
-  body: string;
-  highlight: string | null;
-  actionItems: { task: string; owner: string; ownerType: string }[] | null;
-}
+// ── Data ─────────────────────────────────────────────────────────────────────
 
-const today = new Date().toLocaleDateString("en-US", {
-  weekday: "long", month: "long", day: "numeric", year: "numeric",
-});
+const AUDIENCE = [
+  { icon: "person", label: "CEO / Chief Executive", desc: "Reclaim hours of leadership bandwidth every day." },
+  { icon: "lightbulb", label: "Founder & Co-Founder", desc: "Move fast without drowning in operational overhead." },
+  { icon: "corporate_fare", label: "C-Suite Executives", desc: "Stay ahead with AI-curated intelligence briefings." },
+  { icon: "trending_up", label: "VPs & Directors", desc: "Manage large teams without losing strategic focus." },
+  { icon: "groups", label: "Team Leads & Managers", desc: "Run tighter meetings, ship cleaner outcomes." },
+  { icon: "business_center", label: "Business Professionals", desc: "Work smarter with AI handling the routine load." },
+];
 
-// ── Fallback static data (used if backend is unreachable) ─────────────────────
-const FALLBACK_AGENDA = [
+const CAPABILITIES = [
   {
-    id: "a1", time: "09:00 AM", title: "Q3 Product Strategy Sync",
-    desc: "Review finalized roadmap with Design & Eng leads.",
-    status: "Brief Ready", statusType: "success", isNow: false,
-    participants: ["JL", "KM", "RD"],
+    icon: "mark_email_read",
+    color: "#4285f4",
+    bg: "rgba(66,133,244,0.12)",
+    label: "AI Email Intelligence",
+    desc: "Reads every email, flags urgency, surfaces approvals and auto-categories your inbox — before you open it.",
   },
   {
-    id: "a2", time: "11:30 AM (Now)", title: "Vendor Negotiation: Acme Corp",
-    desc: "AI flagged contract discrepancy in clause 4.2. Review suggested redlines before call.",
-    status: "Action Req", statusType: "warning", isNow: true,
-    participants: [],
+    icon: "draw",
+    color: "#7aaeff",
+    bg: "rgba(122,174,255,0.12)",
+    label: "AI Draft Replies",
+    desc: "Generates context-aware reply drafts in your voice. Review, edit, send. One click.",
   },
   {
-    id: "a3", time: "02:00 PM", title: "Weekly All-Hands",
-    desc: "Company-wide update. AI will record and summarize.",
-    status: "MoM Pending", statusType: "neutral", isNow: false,
-    participants: [],
+    icon: "event_note",
+    color: "#a78bfa",
+    bg: "rgba(167,139,250,0.12)",
+    label: "AI Meeting Preparation",
+    desc: "Delivers a full meeting brief — agenda, participants, prior context — 30 minutes before every call.",
+  },
+  {
+    icon: "summarize",
+    color: "#34a853",
+    bg: "rgba(52,168,83,0.12)",
+    label: "Automatic Meeting Minutes",
+    desc: "Transcribes, summarises, and distributes MoMs with action items assigned in seconds.",
+  },
+  {
+    icon: "calendar_month",
+    color: "#ea4335",
+    bg: "rgba(234,67,53,0.12)",
+    label: "Calendar Optimisation",
+    desc: "Detects conflicts, protects focus blocks, and reorders your day to match your energy.",
+  },
+  {
+    icon: "schedule_send",
+    color: "#fbbc04",
+    bg: "rgba(251,188,4,0.12)",
+    label: "Smart Scheduling",
+    desc: "Finds perfect meeting slots across your team's calendars — no back-and-forth emails.",
+  },
+  {
+    icon: "task_alt",
+    color: "#06b6d4",
+    bg: "rgba(6,182,212,0.12)",
+    label: "Task Automation",
+    desc: "Extracts action items from every email and meeting automatically. Zero manual entry.",
+  },
+  {
+    icon: "insights",
+    color: "#c77dff",
+    bg: "rgba(199,125,255,0.12)",
+    label: "Executive Insights",
+    desc: "A daily AI-curated briefing — priorities, risks, decisions — in under 2 minutes.",
+  },
+  {
+    icon: "notifications_active",
+    color: "#f97316",
+    bg: "rgba(249,115,22,0.12)",
+    label: "AI Notifications",
+    desc: "Only surfaces alerts that actually matter. No noise — just what requires your attention now.",
+  },
+  {
+    icon: "account_tree",
+    color: "#10b981",
+    bg: "rgba(16,185,129,0.12)",
+    label: "Multi-Agent Workflow",
+    desc: "Specialist AI agents work in parallel across email, calendar, and tasks — coordinated automatically.",
   },
 ];
 
-const FALLBACK_ACTIONS = [
-  {
-    id: "p1", type: "Drafted Reply", typeIcon: "mail", confidence: 98, confidenceColor: "#137333",
-    regarding: "Urgent: Q4 Budget Reallocation Request", from: "Sarah Jenkins",
-    body: `Hi Sarah,\n\nI have reviewed the proposed Q4 budget reallocation. Based on the current burn rate and the projected ROI of the new marketing initiative, I approve the shift of $50k from T&E to Digital Ad Spend as outlined in your memo.\n\nPlease proceed with updating the financial models. Let's touch base briefly on Thursday to review the initial ad campaign metrics.\n\nBest,`,
-    highlight: "I approve the shift of $50k from T&E to Digital Ad Spend",
-    actionItems: null,
-  },
-  {
-    id: "p2", type: "MoM Review", typeIcon: "description", confidence: 85, confidenceColor: "#f5b041",
-    regarding: "Board Meeting — Executive Summary", from: "System",
-    body: "AI has generated the meeting minutes and extracted 3 key action items. One item requires manual assignment.",
-    highlight: null,
-    actionItems: [
-      { task: "Finalize hiring plan for Q1", owner: "@HR_Lead", ownerType: "assigned" },
-      { task: "Draft response to investor query on margins", owner: "Assign Owner", ownerType: "unassigned" },
-    ],
-  },
+const STATS = [
+  { value: "4.2h", label: "saved per day" },
+  { value: "98%", label: "AI accuracy" },
+  { value: "<2s", label: "response time" },
+  { value: "10×", label: "faster workflows" },
 ];
 
-const FALLBACK_OVERDUE = [
-  { id: "o1", task: "Sign off on Q3 expense reports", overdue: "2 days overdue" },
-  { id: "o2", task: "Review proposed vendor SLA", overdue: "1 day overdue" },
-];
+// ── Component ─────────────────────────────────────────────────────────────────
 
-const FALLBACK_INSIGHTS = [
-  { text: "3 emails need responses before 5 PM", icon: "mail", type: "warning" },
-  { text: "Board deck deadline is tomorrow", icon: "warning", type: "error" },
-  { text: "98% confidence on Q3 budget reply", icon: "bolt", type: "success" },
-];
-
-// ── Helpers ───────────────────────────────────────────────────────────────────
-function meetingToAgendaItem(m: Meeting, index: number) {
-  const dt = new Date(m.start_time);
-  const timeStr = dt.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
-  const statusType = m.brief_status === "ready" ? "success" : "neutral";
-  return {
-    id: m.id,
-    time: timeStr,
-    title: m.title,
-    desc: m.agenda_items?.join(", ") ?? "No agenda set.",
-    status: m.brief_status === "ready" ? "Brief Ready" : "Pending",
-    statusType,
-    isNow: index === 0,
-    participants: m.participants.map(p => p.slice(0, 2).toUpperCase()),
-  };
-}
-
-function emailToPriorityAction(e: Email) {
-  return {
-    id: e.id,
-    type: e.category === "approval_request" ? "Approval Needed" : "Action Required",
-    typeIcon: e.category === "approval_request" ? "verified" : "warning",
-    confidence: Math.round((e.confidence ?? 0.9) * 100),
-    confidenceColor: (e.confidence ?? 0.9) >= 0.9 ? "#137333" : "#f5b041",
-    regarding: e.subject,
-    from: e.senderName ?? e.sender,
-    body: e.preview ?? e.body?.slice(0, 200) ?? "",
-    highlight: null,
-    actionItems: null,
-  };
-}
-
-export default function Dashboard() {
+export default function LandingPage() {
   const router = useRouter();
-  const { toasts, showToast, removeToast } = useToast();
-  const [agendaItems, setAgendaItems] = useState(FALLBACK_AGENDA);
-  const [priorityActions, setPriorityActions] = useState<PriorityAction[]>(FALLBACK_ACTIONS);
-  const [overdueItems, setOverdueItems] = useState(FALLBACK_OVERDUE);
-  const [insights, setInsights] = useState(FALLBACK_INSIGHTS);
-  const [backendOnline, setBackendOnline] = useState<boolean | null>(null);
-  const [loadingData, setLoadingData] = useState(true);
-  const [editingAction, setEditingAction] = useState<PriorityAction | null>(null);
-  const [editBody, setEditBody] = useState("");
-
-  // Knowledge base query state
-  const [kbQuery, setKbQuery] = useState("");
-  const [kbResult, setKbResult] = useState<string | null>(null);
-  const [kbLoading, setKbLoading] = useState(false);
+  const [mounted, setMounted] = useState(false);
+  const [ripple, setRipple] = useState(false);
+  const [scrolled, setScrolled] = useState(false);
+  const heroRef = useRef<HTMLElement>(null);
 
   useEffect(() => {
-    async function loadDashboardData() {
-      setLoadingData(true);
-      console.log("[ExecAI Dashboard] 🔄 Loading real data from backend...");
-
-      const [meetings, approvalEmails] = await Promise.all([
-        fetchMeetings(),
-        fetchEmails("approval_request"),
-      ]);
-
-      const hasData = meetings.length > 0 || approvalEmails.length > 0;
-      setBackendOnline(hasData);
-
-      if (meetings.length > 0) {
-        const realAgenda = meetings.map((m, i) => meetingToAgendaItem(m, i));
-        setAgendaItems(realAgenda);
-        console.log("[ExecAI Dashboard] ✅ Agenda loaded:", realAgenda.length, "meetings");
-      } else {
-        console.warn("[ExecAI Dashboard] ⚠️  No meetings from backend — using fallback agenda");
-      }
-
-      if (approvalEmails.length > 0) {
-        const realActions = approvalEmails.map(emailToPriorityAction);
-        setPriorityActions(realActions);
-        console.log("[ExecAI Dashboard] ✅ Priority actions loaded:", realActions.length, "emails");
-      } else {
-        // Try all emails as fallback
-        const allEmails = await fetchEmails();
-        if (allEmails.length > 0) {
-          const highPriority = allEmails.filter(e => e.priority === "high" || e.category === "approval_request");
-          if (highPriority.length > 0) {
-            setPriorityActions(highPriority.map(emailToPriorityAction));
-            console.log("[ExecAI Dashboard] ✅ Priority actions from all emails:", highPriority.length);
-          }
-        } else {
-          console.warn("[ExecAI Dashboard] ⚠️  No emails from backend — using fallback priority actions");
-        }
-      }
-
-      setLoadingData(false);
-    }
-
-    loadDashboardData();
+    setMounted(true);
+    const onScroll = () => setScrolled(window.scrollY > 60);
+    window.addEventListener("scroll", onScroll, { passive: true });
+    return () => window.removeEventListener("scroll", onScroll);
   }, []);
 
-  const handleKbQuery = async () => {
-    if (!kbQuery.trim()) return;
-    setKbLoading(true);
-    setKbResult(null);
-    console.log("[ExecAI Dashboard] 🔄 Querying AI pipeline:", kbQuery);
-
-    const result: PipelineResult | null = await triggerPipeline("user_query", { query: kbQuery });
-
-    if (result) {
-      // Extract the most useful text from the pipeline result
-      const summary =
-        result.reply_draft?.body ??
-        (result.meeting_brief?.purpose) ??
-        (result.email_category ? `Category: ${result.email_category}, Priority: ${result.email_priority}` : null) ??
-        result.error ??
-        "AI pipeline processed your query. Check browser console for full result.";
-      setKbResult(summary);
-      // Update insights with the query result
-      setInsights(prev => [
-        { text: `AI Query: "${kbQuery.slice(0, 40)}" — responded`, icon: "auto_awesome", type: "success" },
-        ...prev.slice(0, 2),
-      ]);
-      console.log("[ExecAI Dashboard] ✅ Pipeline result:", result);
-    } else {
-      setKbResult("Backend pipeline is offline. Check the FastAPI server terminal for errors.");
-      console.error("[ExecAI Dashboard] ❌ Pipeline trigger returned null — backend may be down");
-    }
-    setKbLoading(false);
-  };
-
-  const handleApprove = (action: PriorityAction) => {
-    setPriorityActions(prev => prev.filter(a => a.id !== action.id));
-    showToast(`✓ Approved & sent to ${action.from}: "${action.regarding.slice(0, 40)}${action.regarding.length > 40 ? '…' : ''}"`, "success");
-  };
-
-  const handleReject = (action: PriorityAction) => {
-    setPriorityActions(prev => prev.filter(a => a.id !== action.id));
-    showToast(`Rejected: "${action.regarding.slice(0, 45)}${action.regarding.length > 45 ? '…' : ''}"`, "warning");
-  };
-
-  const handleOpenEdit = (action: PriorityAction) => {
-    setEditingAction(action);
-    setEditBody(action.body);
-  };
-
-  const handleSaveEdit = () => {
-    if (!editingAction) return;
-    setPriorityActions(prev => prev.map(a => a.id === editingAction.id ? { ...a, body: editBody } : a));
-    setEditingAction(null);
-    showToast("Draft updated successfully.", "success");
-  };
-
-  const handleMarkOverdone = (id: string, task: string) => {
-    setOverdueItems(prev => prev.filter(o => o.id !== id));
-    showToast(`✓ "${task}" marked as complete.`, "success");
-  };
-
-  const handleAgendaClick = (item: typeof FALLBACK_AGENDA[0]) => {
-    router.push("/meetings/m1/brief");
+  const handleStart = () => {
+    setRipple(true);
+    setTimeout(() => router.push("/onboarding"), 650);
   };
 
   return (
     <>
-      <TopBar title="Executive Dashboard" icon="insights" />
-      <ToastContainer toasts={toasts} onRemove={removeToast} />
+      <style>{`
+        /* ── Reset & Base ── */
+        *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
-      {/* Edit Draft Modal */}
-      {editingAction && (
-        <div
-          style={{
-            position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", zIndex: 1000,
-            display: "flex", alignItems: "center", justifyContent: "center",
-          }}
-          onClick={e => e.target === e.currentTarget && setEditingAction(null)}
-        >
-          <div style={{
-            background: "var(--surface)", borderRadius: 12, padding: 28,
-            width: 540, boxShadow: "0 8px 40px rgba(0,0,0,0.18)",
-          }}>
-            <h3 style={{ fontSize: 16, fontWeight: 600, color: "var(--on-surface)", marginBottom: 4 }}>
-              Edit Draft Reply
-            </h3>
-            <p style={{ fontSize: 12, color: "var(--on-surface-variant)", marginBottom: 16 }}>
-              Regarding: <strong>{editingAction.regarding}</strong> · From: {editingAction.from}
-            </p>
-            <textarea
-              value={editBody}
-              onChange={e => setEditBody(e.target.value)}
-              style={{
-                width: "100%", minHeight: 140, padding: 12, fontSize: 13,
-                border: "1px solid var(--outline-variant)", borderRadius: 6,
-                background: "var(--surface-container-low)", color: "var(--on-surface)",
-                resize: "vertical", fontFamily: "inherit", lineHeight: 1.7,
-                boxSizing: "border-box",
-              }}
-            />
-            <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 16 }}>
-              <button className="btn btn-ghost btn-sm" onClick={() => setEditingAction(null)}>Cancel</button>
-              <button className="btn btn-primary btn-sm" onClick={handleSaveEdit}>
-                <span className="material-symbols-outlined" style={{ fontSize: 15 }}>save</span>
-                Save Draft
-              </button>
-            </div>
+        /* ── Keyframes ── */
+        @keyframes gradientShift {
+          0%   { background-position: 0% 50%; }
+          50%  { background-position: 100% 50%; }
+          100% { background-position: 0% 50%; }
+        }
+        @keyframes floatUp {
+          from { opacity: 0; transform: translateY(28px); }
+          to   { opacity: 1; transform: translateY(0); }
+        }
+        @keyframes fadeIn {
+          from { opacity: 0; }
+          to   { opacity: 1; }
+        }
+        @keyframes pulse-ring {
+          0%   { transform: scale(1); opacity: 0.5; }
+          100% { transform: scale(1.7); opacity: 0; }
+        }
+        @keyframes shimmer {
+          0%   { background-position: -200% 0; }
+          100% { background-position:  200% 0; }
+        }
+        @keyframes rippleOut {
+          0%   { transform: scale(1); opacity: 1; }
+          100% { transform: scale(35); opacity: 0; }
+        }
+        @keyframes orb1 {
+          0%,100% { transform: translate(0,0) scale(1); }
+          33%     { transform: translate(70px,-50px) scale(1.12); }
+          66%     { transform: translate(-40px,35px) scale(0.94); }
+        }
+        @keyframes orb2 {
+          0%,100% { transform: translate(0,0) scale(1); }
+          33%     { transform: translate(-60px,55px) scale(1.07); }
+          66%     { transform: translate(50px,-25px) scale(1.12); }
+        }
+        @keyframes orb3 {
+          0%,100% { transform: translate(0,0) scale(1); }
+          50%     { transform: translate(35px,65px) scale(1.09); }
+        }
+        @keyframes badgePop {
+          0%   { opacity: 0; transform: scale(0.8) translateY(6px); }
+          100% { opacity: 1; transform: scale(1) translateY(0); }
+        }
+        @keyframes cardEntrance {
+          from { opacity: 0; transform: translateY(24px) scale(0.97); }
+          to   { opacity: 1; transform: translateY(0) scale(1); }
+        }
+        @keyframes scanline {
+          0%   { transform: translateY(-100%); }
+          100% { transform: translateY(100%); }
+        }
+        @keyframes dotPulse {
+          0%,100% { opacity: 1; }
+          50%     { opacity: 0.3; }
+        }
+
+        /* ── Root ── */
+        .lp-root {
+          min-height: 100vh;
+          width: 100%;
+          background: #080c18;
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          overflow-x: hidden;
+          position: relative;
+          font-family: 'Inter', system-ui, sans-serif;
+          color: #fff;
+        }
+
+        /* ── Background orbs ── */
+        .orb {
+          position: fixed;
+          border-radius: 50%;
+          filter: blur(100px);
+          pointer-events: none;
+          z-index: 0;
+        }
+        .orb-1 {
+          width: 700px; height: 700px;
+          background: radial-gradient(circle, rgba(52,89,165,0.32) 0%, transparent 70%);
+          top: -200px; left: -150px;
+          animation: orb1 20s ease-in-out infinite;
+        }
+        .orb-2 {
+          width: 580px; height: 580px;
+          background: radial-gradient(circle, rgba(134,69,138,0.22) 0%, transparent 70%);
+          top: 25%; right: -160px;
+          animation: orb2 25s ease-in-out infinite;
+        }
+        .orb-3 {
+          width: 480px; height: 480px;
+          background: radial-gradient(circle, rgba(6,182,212,0.14) 0%, transparent 70%);
+          bottom: 5%; left: 15%;
+          animation: orb3 18s ease-in-out infinite;
+        }
+        .orb-4 {
+          width: 400px; height: 400px;
+          background: radial-gradient(circle, rgba(199,125,255,0.12) 0%, transparent 70%);
+          bottom: 30%; right: 5%;
+          animation: orb1 28s ease-in-out infinite reverse;
+        }
+
+        /* ── Grid noise overlay ── */
+        .grid-overlay {
+          position: fixed;
+          inset: 0;
+          background-image:
+            linear-gradient(rgba(255,255,255,0.022) 1px, transparent 1px),
+            linear-gradient(90deg, rgba(255,255,255,0.022) 1px, transparent 1px);
+          background-size: 60px 60px;
+          pointer-events: none;
+          z-index: 0;
+        }
+
+        /* ── Ripple overlay ── */
+        .ripple-overlay {
+          position: fixed;
+          inset: 0;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          pointer-events: none;
+          z-index: 9999;
+        }
+        .ripple-circle {
+          width: 80px; height: 80px;
+          background: linear-gradient(135deg, #3459a5, #7b5ea7);
+          border-radius: 50%;
+          animation: rippleOut 0.65s ease-out forwards;
+        }
+
+        /* ── Navigation ── */
+        .nav {
+          width: 100%;
+          position: sticky;
+          top: 0;
+          z-index: 100;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          padding: 0 40px;
+          transition: all 0.4s ease;
+        }
+        .nav.scrolled {
+          background: rgba(8,12,24,0.85);
+          backdrop-filter: blur(20px);
+          border-bottom: 1px solid rgba(255,255,255,0.06);
+          box-shadow: 0 4px 32px rgba(0,0,0,0.3);
+        }
+        .nav-inner {
+          width: 100%;
+          max-width: 1200px;
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          padding: 20px 0;
+        }
+        .nav-logo {
+          display: flex;
+          align-items: center;
+          gap: 12px;
+        }
+        .nav-logo-mark {
+          width: 38px; height: 38px;
+          border-radius: 10px;
+          background: linear-gradient(135deg, #3459a5 0%, #86458a 100%);
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          box-shadow: 0 0 16px rgba(52,89,165,0.4);
+        }
+        .nav-brand {
+          font-size: 17px;
+          font-weight: 700;
+          color: #fff;
+          letter-spacing: -0.3px;
+        }
+        .nav-badge {
+          font-size: 10px;
+          font-weight: 600;
+          color: #7aaeff;
+          background: rgba(52,89,165,0.15);
+          border: 1px solid rgba(52,89,165,0.3);
+          border-radius: 99px;
+          padding: 4px 12px;
+          letter-spacing: 0.08em;
+          text-transform: uppercase;
+        }
+
+        /* ── Section base ── */
+        .section {
+          width: 100%;
+          max-width: 1200px;
+          padding: 0 40px;
+          position: relative;
+          z-index: 10;
+        }
+
+        /* ── Section label ── */
+        .section-label {
+          display: inline-flex;
+          align-items: center;
+          gap: 8px;
+          font-size: 11px;
+          font-weight: 700;
+          letter-spacing: 0.14em;
+          text-transform: uppercase;
+          color: #7aaeff;
+          margin-bottom: 18px;
+        }
+        .section-label-dot {
+          width: 5px; height: 5px;
+          border-radius: 50%;
+          background: #7aaeff;
+        }
+
+        /* ── Hero ── */
+        .hero {
+          padding: 100px 40px 80px;
+          text-align: center;
+          max-width: 900px;
+          margin: 0 auto;
+        }
+        .hero-eyebrow {
+          display: inline-flex;
+          align-items: center;
+          gap: 10px;
+          background: rgba(52,89,165,0.12);
+          border: 1px solid rgba(52,89,165,0.28);
+          border-radius: 99px;
+          padding: 7px 20px;
+          font-size: 12px;
+          font-weight: 600;
+          color: #7aaeff;
+          letter-spacing: 0.07em;
+          text-transform: uppercase;
+          margin-bottom: 32px;
+          animation: badgePop 0.6s 0.15s ease both;
+        }
+        .eyebrow-dot {
+          width: 6px; height: 6px;
+          border-radius: 50%;
+          background: #7aaeff;
+          animation: pulse-ring 1.6s ease-out infinite;
+        }
+        .hero-title {
+          font-size: clamp(46px, 7vw, 80px);
+          font-weight: 900;
+          line-height: 1.03;
+          letter-spacing: -3px;
+          color: #fff;
+          margin-bottom: 28px;
+          animation: floatUp 0.7s 0.25s ease both;
+        }
+        .hero-title-grad {
+          background: linear-gradient(130deg, #7aaeff 0%, #c77dff 40%, #f97316 75%, #7aaeff 100%);
+          background-size: 250% auto;
+          -webkit-background-clip: text;
+          -webkit-text-fill-color: transparent;
+          background-clip: text;
+          animation: shimmer 5s linear infinite;
+        }
+        .hero-sub {
+          font-size: 19px;
+          font-weight: 400;
+          color: rgba(255,255,255,0.52);
+          line-height: 1.7;
+          max-width: 620px;
+          margin: 0 auto 16px;
+          animation: floatUp 0.7s 0.35s ease both;
+        }
+        .hero-tags {
+          display: flex;
+          flex-wrap: wrap;
+          justify-content: center;
+          gap: 8px;
+          margin-bottom: 52px;
+          animation: floatUp 0.7s 0.45s ease both;
+        }
+        .hero-tag {
+          font-size: 12px;
+          font-weight: 600;
+          color: rgba(255,255,255,0.45);
+          background: rgba(255,255,255,0.05);
+          border: 1px solid rgba(255,255,255,0.1);
+          border-radius: 99px;
+          padding: 5px 14px;
+          letter-spacing: 0.02em;
+        }
+
+        /* ── Primary CTA ── */
+        .cta-wrap {
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          gap: 14px;
+          animation: floatUp 0.7s 0.55s ease both;
+        }
+        .cta-btn {
+          position: relative;
+          display: inline-flex;
+          align-items: center;
+          gap: 12px;
+          background: linear-gradient(135deg, #3459a5 0%, #5b4fcf 45%, #86458a 100%);
+          background-size: 200% auto;
+          color: #fff;
+          font-size: 17px;
+          font-weight: 700;
+          padding: 20px 56px;
+          border-radius: 99px;
+          border: none;
+          cursor: pointer;
+          letter-spacing: 0.01em;
+          box-shadow: 0 0 0 0 rgba(52,89,165,0.5), 0 10px 40px rgba(52,89,165,0.45);
+          transition: all 0.35s ease;
+          animation: shimmer 5s linear infinite;
+          overflow: hidden;
+        }
+        .cta-btn::before {
+          content: '';
+          position: absolute;
+          inset: 0;
+          background: rgba(255,255,255,0);
+          transition: background 0.2s;
+          border-radius: inherit;
+        }
+        .cta-btn:hover::before { background: rgba(255,255,255,0.09); }
+        .cta-btn:hover {
+          transform: translateY(-3px);
+          box-shadow: 0 0 0 10px rgba(52,89,165,0.13), 0 20px 56px rgba(52,89,165,0.55);
+        }
+        .cta-btn:active { transform: translateY(0); }
+        .cta-btn-ring {
+          position: absolute;
+          inset: -4px;
+          border-radius: 99px;
+          border: 2px solid rgba(52,89,165,0.35);
+          animation: pulse-ring 2.2s ease-out infinite;
+        }
+        .cta-note {
+          font-size: 12px;
+          color: rgba(255,255,255,0.28);
+          font-weight: 500;
+          letter-spacing: 0.02em;
+        }
+
+        /* ── Stats row ── */
+        .stats-row {
+          display: flex;
+          justify-content: center;
+          gap: 0;
+          margin-top: 72px;
+          animation: floatUp 0.7s 0.7s ease both;
+        }
+        .stat-item {
+          text-align: center;
+          padding: 0 40px;
+          border-right: 1px solid rgba(255,255,255,0.07);
+        }
+        .stat-item:last-child { border-right: none; }
+        .stat-value {
+          font-size: 32px;
+          font-weight: 800;
+          color: #fff;
+          letter-spacing: -1.5px;
+          line-height: 1;
+        }
+        .stat-label {
+          font-size: 11px;
+          color: rgba(255,255,255,0.38);
+          font-weight: 600;
+          margin-top: 5px;
+          text-transform: uppercase;
+          letter-spacing: 0.09em;
+        }
+
+        /* ── Section divider ── */
+        .section-divider {
+          width: 100%;
+          max-width: 1200px;
+          height: 1px;
+          background: linear-gradient(90deg, transparent, rgba(255,255,255,0.08), transparent);
+          margin: 0 auto;
+        }
+
+        /* ── Target Audience ── */
+        .audience-section {
+          padding: 100px 40px;
+          width: 100%;
+          max-width: 1200px;
+          position: relative;
+          z-index: 10;
+        }
+        .audience-heading {
+          font-size: clamp(32px, 4vw, 50px);
+          font-weight: 800;
+          color: #fff;
+          letter-spacing: -1.5px;
+          line-height: 1.1;
+          margin-bottom: 14px;
+        }
+        .audience-sub {
+          font-size: 17px;
+          color: rgba(255,255,255,0.45);
+          margin-bottom: 56px;
+          max-width: 500px;
+          line-height: 1.65;
+        }
+        .audience-grid {
+          display: grid;
+          grid-template-columns: repeat(3, 1fr);
+          gap: 16px;
+        }
+        .audience-card {
+          background: rgba(255,255,255,0.035);
+          border: 1px solid rgba(255,255,255,0.08);
+          border-radius: 20px;
+          padding: 28px 24px;
+          display: flex;
+          align-items: flex-start;
+          gap: 18px;
+          transition: all 0.35s ease;
+          cursor: default;
+          animation: cardEntrance 0.5s ease both;
+        }
+        .audience-card:hover {
+          background: rgba(255,255,255,0.06);
+          border-color: rgba(52,89,165,0.35);
+          transform: translateY(-5px);
+          box-shadow: 0 12px 40px rgba(52,89,165,0.18);
+        }
+        .audience-icon-wrap {
+          width: 48px; height: 48px;
+          border-radius: 14px;
+          background: linear-gradient(135deg, rgba(52,89,165,0.2) 0%, rgba(134,69,138,0.2) 100%);
+          border: 1px solid rgba(52,89,165,0.2);
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          flex-shrink: 0;
+        }
+        .audience-text { flex: 1; }
+        .audience-title {
+          font-size: 15px;
+          font-weight: 700;
+          color: #fff;
+          margin-bottom: 5px;
+          letter-spacing: -0.2px;
+        }
+        .audience-desc {
+          font-size: 13px;
+          color: rgba(255,255,255,0.42);
+          line-height: 1.55;
+        }
+
+        /* ── Why Different ── */
+        .why-section {
+          padding: 100px 40px;
+          width: 100%;
+          max-width: 1200px;
+          position: relative;
+          z-index: 10;
+        }
+        .why-heading {
+          font-size: clamp(32px, 4vw, 50px);
+          font-weight: 800;
+          color: #fff;
+          letter-spacing: -1.5px;
+          line-height: 1.1;
+          margin-bottom: 14px;
+        }
+        .why-sub {
+          font-size: 17px;
+          color: rgba(255,255,255,0.45);
+          margin-bottom: 56px;
+          max-width: 540px;
+          line-height: 1.65;
+        }
+        .capabilities-grid {
+          display: grid;
+          grid-template-columns: repeat(5, 1fr);
+          gap: 14px;
+        }
+        .cap-card {
+          background: rgba(255,255,255,0.03);
+          border: 1px solid rgba(255,255,255,0.07);
+          border-radius: 18px;
+          padding: 24px 20px;
+          transition: all 0.35s ease;
+          cursor: default;
+          animation: cardEntrance 0.5s ease both;
+          position: relative;
+          overflow: hidden;
+        }
+        .cap-card::after {
+          content: '';
+          position: absolute;
+          inset: 0;
+          background: linear-gradient(135deg, transparent 60%, rgba(255,255,255,0.02) 100%);
+          pointer-events: none;
+        }
+        .cap-card:hover {
+          background: rgba(255,255,255,0.055);
+          transform: translateY(-5px);
+          box-shadow: 0 12px 36px rgba(0,0,0,0.25);
+        }
+        .cap-icon-wrap {
+          width: 44px; height: 44px;
+          border-radius: 12px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          margin-bottom: 16px;
+          transition: transform 0.3s;
+        }
+        .cap-card:hover .cap-icon-wrap {
+          transform: scale(1.1);
+        }
+        .cap-label {
+          font-size: 13px;
+          font-weight: 700;
+          color: #fff;
+          margin-bottom: 8px;
+          line-height: 1.25;
+          letter-spacing: -0.1px;
+        }
+        .cap-desc {
+          font-size: 11.5px;
+          color: rgba(255,255,255,0.38);
+          line-height: 1.6;
+        }
+
+        /* ── Trust / Social Proof ── */
+        .trust-section {
+          width: 100%;
+          padding: 60px 40px;
+          position: relative;
+          z-index: 10;
+          text-align: center;
+        }
+        .trust-inner {
+          max-width: 1000px;
+          margin: 0 auto;
+          background: rgba(255,255,255,0.025);
+          border: 1px solid rgba(255,255,255,0.07);
+          border-radius: 24px;
+          padding: 48px 60px;
+          backdrop-filter: blur(16px);
+        }
+        .trust-label {
+          font-size: 11px;
+          font-weight: 700;
+          color: rgba(255,255,255,0.3);
+          text-transform: uppercase;
+          letter-spacing: 0.14em;
+          margin-bottom: 32px;
+        }
+        .trust-stats {
+          display: flex;
+          justify-content: center;
+          gap: 0;
+        }
+        .trust-stat {
+          flex: 1;
+          padding: 0 32px;
+          border-right: 1px solid rgba(255,255,255,0.08);
+        }
+        .trust-stat:last-child { border-right: none; }
+        .trust-stat-value {
+          font-size: 42px;
+          font-weight: 900;
+          letter-spacing: -2px;
+          line-height: 1;
+          background: linear-gradient(135deg, #7aaeff 0%, #c77dff 100%);
+          -webkit-background-clip: text;
+          -webkit-text-fill-color: transparent;
+          background-clip: text;
+          margin-bottom: 8px;
+        }
+        .trust-stat-label {
+          font-size: 12px;
+          color: rgba(255,255,255,0.38);
+          font-weight: 600;
+          text-transform: uppercase;
+          letter-spacing: 0.09em;
+        }
+
+        /* ── Bottom CTA ── */
+        .bottom-cta {
+          width: 100%;
+          padding: 100px 40px 120px;
+          position: relative;
+          z-index: 10;
+          text-align: center;
+        }
+        .bottom-cta-inner {
+          max-width: 700px;
+          margin: 0 auto;
+        }
+        .bottom-cta-eyebrow {
+          font-size: 11px;
+          font-weight: 700;
+          color: #7aaeff;
+          text-transform: uppercase;
+          letter-spacing: 0.14em;
+          margin-bottom: 20px;
+        }
+        .bottom-cta-title {
+          font-size: clamp(28px, 4vw, 46px);
+          font-weight: 800;
+          color: #fff;
+          letter-spacing: -1.5px;
+          line-height: 1.1;
+          margin-bottom: 20px;
+        }
+        .bottom-cta-sub {
+          font-size: 16px;
+          color: rgba(255,255,255,0.42);
+          margin-bottom: 44px;
+          line-height: 1.65;
+        }
+
+        /* ── Footer ── */
+        .footer {
+          width: 100%;
+          border-top: 1px solid rgba(255,255,255,0.06);
+          padding: 28px 40px;
+          text-align: center;
+          position: relative;
+          z-index: 10;
+        }
+        .footer-text {
+          font-size: 12px;
+          color: rgba(255,255,255,0.2);
+          font-weight: 500;
+        }
+
+        /* ── Responsive ── */
+        @media (max-width: 1024px) {
+          .capabilities-grid { grid-template-columns: repeat(3, 1fr); }
+          .audience-grid { grid-template-columns: repeat(2, 1fr); }
+        }
+        @media (max-width: 768px) {
+          .hero { padding: 72px 24px 60px; }
+          .audience-section, .why-section { padding: 72px 24px; }
+          .capabilities-grid { grid-template-columns: repeat(2, 1fr); }
+          .audience-grid { grid-template-columns: 1fr; }
+          .stats-row { gap: 0; flex-wrap: wrap; }
+          .stat-item { padding: 16px 24px; border-right: none; border-bottom: 1px solid rgba(255,255,255,0.07); width: 50%; }
+          .stat-item:nth-child(odd) { border-right: 1px solid rgba(255,255,255,0.07); }
+          .trust-inner { padding: 36px 24px; }
+          .trust-stats { flex-wrap: wrap; }
+          .trust-stat { padding: 16px; border-right: none; border-bottom: 1px solid rgba(255,255,255,0.08); width: 50%; }
+          .trust-stat:nth-child(odd) { border-right: 1px solid rgba(255,255,255,0.08); }
+          .nav { padding: 0 24px; }
+        }
+        @media (max-width: 480px) {
+          .capabilities-grid { grid-template-columns: 1fr 1fr; }
+          .hero-title { letter-spacing: -2px; }
+          .cta-btn { padding: 18px 36px; font-size: 15px; }
+          .bottom-cta { padding: 72px 24px 80px; }
+        }
+      `}</style>
+
+      <div className="lp-root">
+        {/* Background */}
+        <div className="orb orb-1" />
+        <div className="orb orb-2" />
+        <div className="orb orb-3" />
+        <div className="orb orb-4" />
+        <div className="grid-overlay" />
+
+        {/* Ripple on CTA click */}
+        {ripple && (
+          <div className="ripple-overlay">
+            <div className="ripple-circle" />
           </div>
-        </div>
-      )}
-      <div className="page-content">
-        <div className="page-body animate-in">
+        )}
 
-          {/* Date header */}
-          <div style={{ marginBottom: 24, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-              <p style={{ fontSize: 13, color: "var(--on-surface-variant)" }}>{today}</p>
-              {backendOnline !== null && (
-                <span style={{
-                  display: "inline-flex", alignItems: "center", gap: 5, fontSize: 11, fontWeight: 500,
-                  padding: "2px 8px", borderRadius: 99,
-                  background: backendOnline ? "#e6f4ea" : "#fff8e1",
-                  color: backendOnline ? "#137333" : "#f57f17",
-                }}>
-                  <span style={{
-                    width: 6, height: 6, borderRadius: "50%", display: "inline-block",
-                    background: backendOnline ? "#137333" : "#f57f17",
-                  }} />
-                  {backendOnline ? "Live Data" : "Fallback Mode"}
+        {/* ── Navigation ── */}
+        <nav className={`nav${scrolled ? " scrolled" : ""}`}>
+          <div className="nav-inner">
+            <div className="nav-logo">
+              <div className="nav-logo-mark">
+                <span className="material-symbols-outlined" style={{ fontSize: 20, color: "#fff", fontVariationSettings: "'FILL' 1, 'wght' 500" }}>
+                  bolt
                 </span>
-              )}
+              </div>
+              <span className="nav-brand">ExecuPilot AI</span>
             </div>
-            <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: "var(--on-surface-variant)" }}>
-              <span style={{ fontSize: 12, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.06em" }}>
-                {priorityActions.length} Pending Approvals
+            <span className="nav-badge">Enterprise Suite</span>
+          </div>
+        </nav>
+
+        {/* ══════════════════════════════════════════════ HERO */}
+        <section className="hero" ref={heroRef} id="hero">
+          <div className="hero-eyebrow">
+            <div className="eyebrow-dot" />
+            AI-Powered Executive Intelligence
+          </div>
+
+          <h1 className="hero-title">
+            Your AI{" "}
+            <span className="hero-title-grad">Executive</span>
+            <br />
+            Assistant
+          </h1>
+
+          <p className="hero-sub">
+            The platform that automatically manages everything on your plate —
+          </p>
+
+          <div className="hero-tags">
+            {["Emails", "Meetings", "Calendar", "Tasks", "Follow-ups", "Executive Workflows"].map((t) => (
+              <span key={t} className="hero-tag">{t}</span>
+            ))}
+          </div>
+
+          {/* Single primary CTA */}
+          <div className="cta-wrap">
+            <button className="cta-btn" id="start-demo-btn" onClick={handleStart}>
+              <div className="cta-btn-ring" />
+              <span className="material-symbols-outlined" style={{ fontSize: 22, fontVariationSettings: "'FILL' 1" }}>
+                play_circle
               </span>
+              Start Interactive Demo
+            </button>
+            <span className="cta-note">No account required &nbsp;·&nbsp; 5-minute interactive walkthrough</span>
+          </div>
+
+          {/* Stats */}
+          <div className="stats-row">
+            {STATS.map((s) => (
+              <div key={s.label} className="stat-item">
+                <div className="stat-value">{s.value}</div>
+                <div className="stat-label">{s.label}</div>
+              </div>
+            ))}
+          </div>
+        </section>
+
+        <div className="section-divider" />
+
+        {/* ══════════════════════════════════════════════ TARGET AUDIENCE */}
+        <section className="audience-section" id="audience">
+          <div className="section-label">
+            <div className="section-label-dot" />
+            Built For
+          </div>
+          <h2 className="audience-heading">
+            Designed for leaders<br />who move fast
+          </h2>
+          <p className="audience-sub">
+            ExecuPilot AI is purpose-built for the people whose time is the most valuable in any organisation.
+          </p>
+
+          <div className="audience-grid">
+            {AUDIENCE.map((a, i) => (
+              <div
+                key={a.label}
+                className="audience-card"
+                style={{ animationDelay: `${i * 80}ms` }}
+              >
+                <div className="audience-icon-wrap">
+                  <span
+                    className="material-symbols-outlined"
+                    style={{ fontSize: 22, color: "#7aaeff", fontVariationSettings: "'FILL' 1" }}
+                  >
+                    {a.icon}
+                  </span>
+                </div>
+                <div className="audience-text">
+                  <div className="audience-title">{a.label}</div>
+                  <div className="audience-desc">{a.desc}</div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </section>
+
+        <div className="section-divider" />
+
+        {/* ══════════════════════════════════════════════ WHY DIFFERENT */}
+        <section className="why-section" id="features">
+          <div className="section-label">
+            <div className="section-label-dot" />
+            Why ExecuPilot AI
+          </div>
+          <h2 className="why-heading">
+            Not just another<br />productivity tool
+          </h2>
+          <p className="why-sub">
+            Ten deeply integrated AI capabilities working in concert — so every part of your executive day runs on autopilot.
+          </p>
+
+          <div className="capabilities-grid">
+            {CAPABILITIES.map((c, i) => (
+              <div
+                key={c.label}
+                className="cap-card"
+                style={{ animationDelay: `${i * 60}ms` }}
+              >
+                <div
+                  className="cap-icon-wrap"
+                  style={{ background: c.bg, border: `1px solid ${c.color}22` }}
+                >
+                  <span
+                    className="material-symbols-outlined"
+                    style={{ fontSize: 22, color: c.color, fontVariationSettings: "'FILL' 1" }}
+                  >
+                    {c.icon}
+                  </span>
+                </div>
+                <div className="cap-label">{c.label}</div>
+                <div className="cap-desc">{c.desc}</div>
+              </div>
+            ))}
+          </div>
+        </section>
+
+        <div className="section-divider" />
+
+        {/* ══════════════════════════════════════════════ TRUST BAR */}
+        <section className="trust-section" id="trust">
+          <div className="trust-inner">
+            <div className="trust-label">Proven executive impact</div>
+            <div className="trust-stats">
+              <div className="trust-stat">
+                <div className="trust-stat-value">4.2h</div>
+                <div className="trust-stat-label">Saved per day, per executive</div>
+              </div>
+              <div className="trust-stat">
+                <div className="trust-stat-value">98%</div>
+                <div className="trust-stat-label">AI task accuracy rate</div>
+              </div>
+              <div className="trust-stat">
+                <div className="trust-stat-value">&lt;2s</div>
+                <div className="trust-stat-label">Average AI response time</div>
+              </div>
+              <div className="trust-stat">
+                <div className="trust-stat-value">10×</div>
+                <div className="trust-stat-label">Faster workflow execution</div>
+              </div>
             </div>
           </div>
+        </section>
 
-          {/* 3-Column Grid */}
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 2fr 1fr", gap: 24 }}>
-
-            {/* ── Column 1: Today's Agenda ── */}
-            <section style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-              <div className="section-header">
-                <h3 className="section-title">
-                  <span className="material-symbols-outlined" style={{ fontSize: 18 }}>schedule</span>
-                  Today&apos;s Agenda
-                </h3>
-                <span style={{ fontSize: 11, fontWeight: 500, color: "var(--on-surface-variant)", textTransform: "uppercase", letterSpacing: "0.06em" }}>
-                  {loadingData ? "Loading..." : `${agendaItems.length} meetings`}
+        {/* ══════════════════════════════════════════════ BOTTOM CTA */}
+        <section className="bottom-cta" id="cta">
+          <div className="bottom-cta-inner">
+            <div className="bottom-cta-eyebrow">Get Started — Free Demo</div>
+            <h2 className="bottom-cta-title">
+              Ready to experience the future of executive productivity?
+            </h2>
+            <p className="bottom-cta-sub">
+              See ExecuPilot AI in action. Walk through the full platform in 5 minutes — no sign-up, no commitment.
+            </p>
+            <div className="cta-wrap">
+              <button className="cta-btn" id="start-demo-bottom-btn" onClick={handleStart}>
+                <div className="cta-btn-ring" />
+                <span className="material-symbols-outlined" style={{ fontSize: 22, fontVariationSettings: "'FILL' 1" }}>
+                  play_circle
                 </span>
-              </div>
-
-              <div className="timeline">
-                {agendaItems.map((item) => (
-                  <div key={item.id} className="timeline-item">
-                    <div className={`timeline-dot ${item.isNow ? "active" : ""}`} />
-                    <div
-                      className="card-sm"
-                      style={{
-                        padding: 14, cursor: "pointer", transition: "background 0.15s",
-                        border: item.isNow ? "1px solid var(--secondary)" : undefined,
-                      }}
-                      onClick={() => handleAgendaClick(item)}
-                    >
-                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 6 }}>
-                        <p style={{
-                          fontSize: 11, fontFamily: "var(--font-mono)",
-                          color: item.isNow ? "var(--secondary)" : "var(--on-surface-variant)",
-                          fontWeight: item.isNow ? 700 : 400,
-                        }}>
-                          {item.time}
-                        </p>
-                        <span
-                          className="badge"
-                          style={{
-                            background: item.statusType === "success" ? "#e6f4ea" : item.statusType === "warning" ? "#fff8e1" : "var(--surface-container-high)",
-                            color: item.statusType === "success" ? "#137333" : item.statusType === "warning" ? "#f57f17" : "var(--on-surface-variant)",
-                          }}
-                        >
-                          {item.statusType === "warning" && (
-                            <span className="material-symbols-outlined" style={{ fontSize: 12 }}>warning</span>
-                          )}
-                          {item.status}
-                        </span>
-                      </div>
-                      <h4 style={{ fontSize: 14, fontWeight: 600, color: "var(--on-surface)", marginBottom: 4 }}>
-                        {item.title}
-                      </h4>
-                      <p className="line-clamp-2" style={{ fontSize: 13, color: "var(--on-surface-variant)" }}>
-                        {item.desc}
-                      </p>
-                      {item.participants.length > 0 && (
-                        <div style={{ marginTop: 8, display: "flex", gap: 4 }}>
-                          {item.participants.map((p, i) => (
-                            <div key={i} style={{
-                              width: 22, height: 22, borderRadius: "50%", background: "var(--surface-container)",
-                              border: "2px solid var(--surface-container-lowest)",
-                              display: "flex", alignItems: "center", justifyContent: "center",
-                              fontSize: 9, fontWeight: 700, color: "var(--on-surface-variant)",
-                              marginLeft: i > 0 ? -6 : 0,
-                            }}>
-                              {p}
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </section>
-
-            {/* ── Column 2: Priority Actions ── */}
-            <section style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-              <div className="section-header">
-                <h3 className="section-title">
-                  <span className="material-symbols-outlined" style={{ fontSize: 18, color: "var(--secondary)" }}>rule</span>
-                  Priority Actions
-                </h3>
-                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                  <span style={{ fontSize: 12, color: "var(--on-surface-variant)" }}>
-                    {loadingData ? "Loading..." : `${priorityActions.length} Pending`}
-                  </span>
-                  <a href="/inbox" style={{ fontSize: 12, color: "var(--secondary)", textDecoration: "none", fontWeight: 500 }}>View All</a>
-                </div>
-              </div>
-
-              <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-                {priorityActions.map((action) => (
-                  <div key={action.id} className="card">
-                    {/* Card Header */}
-                    <div className="card-header">
-                      <div style={{ display: "flex", alignItems: "center", gap: 8, color: "var(--on-surface-variant)" }}>
-                        <span className="material-symbols-outlined" style={{ fontSize: 18 }}>{action.typeIcon}</span>
-                        <span style={{ fontSize: 11, fontWeight: 500, textTransform: "uppercase", letterSpacing: "0.04em" }}>
-                          {action.type}
-                        </span>
-                      </div>
-                      <div className="confidence-bar">
-                        <span style={{ fontSize: 11, color: "var(--on-surface-variant)" }}>Confidence</span>
-                        <div className="confidence-bar-track">
-                          <div
-                            className="confidence-bar-fill"
-                            style={{ width: `${action.confidence}%`, background: action.confidenceColor }}
-                          />
-                        </div>
-                        <span className="confidence-text" style={{ color: action.confidenceColor }}>
-                          {action.confidence}%
-                        </span>
-                      </div>
-                    </div>
-
-                    {/* Card Body */}
-                    <div className="card-body">
-                      {action.regarding && (
-                        <p style={{ fontSize: 12, color: "var(--on-surface-variant)", marginBottom: 10 }}>
-                          Regarding: <strong style={{ color: "var(--on-surface)" }}>{action.regarding}</strong>
-                          {action.from && ` from ${action.from}`}
-                        </p>
-                      )}
-
-                      {action.body && !action.actionItems && (
-                        <div style={{
-                          background: "var(--surface-container-low)",
-                          border: "1px solid var(--outline-variant)",
-                          borderRadius: 4, padding: 12, fontSize: 13, color: "var(--on-surface)",
-                          lineHeight: 1.6, whiteSpace: "pre-line", position: "relative",
-                        }}>
-                          {action.body}
-                          <span className="material-symbols-outlined" style={{
-                            position: "absolute", top: 8, right: 8, fontSize: 16,
-                            color: "var(--outline-variant)", opacity: 0.6,
-                          }}>
-                            edit_note
-                          </span>
-                        </div>
-                      )}
-
-                      {action.actionItems && (
-                        <>
-                          <p style={{ fontSize: 13, color: "var(--on-surface-variant)", marginBottom: 12 }}>
-                            {action.body}
-                          </p>
-                          <div style={{ border: "1px solid var(--outline-variant)", borderRadius: 4, overflow: "hidden" }}>
-                            <div style={{
-                              background: "var(--surface-container-low)", padding: "6px 12px",
-                              borderBottom: "1px solid var(--outline-variant)",
-                              fontSize: 11, fontWeight: 600, color: "var(--on-surface)",
-                            }}>
-                              Extracted Action Items
-                            </div>
-                            {action.actionItems.map((ai, i) => (
-                              <div key={i} style={{
-                                padding: "8px 12px", display: "flex", justifyContent: "space-between",
-                                alignItems: "center",
-                                borderBottom: i < action.actionItems!.length - 1 ? "1px solid var(--outline-variant)" : "none",
-                                background: ai.ownerType === "unassigned" ? "#fff8e1" : "transparent",
-                                fontSize: 13,
-                              }}>
-                                <span style={{ color: "var(--on-surface)" }}>{ai.task}</span>
-                                {ai.ownerType === "assigned" ? (
-                                  <span style={{
-                                    fontSize: 11, fontFamily: "var(--font-mono)", color: "var(--secondary)",
-                                    background: "rgba(82,94,125,0.1)", padding: "2px 6px", borderRadius: 3,
-                                  }}>
-                                    {ai.owner}
-                                  </span>
-                                ) : (
-                                  <button className="btn btn-sm" style={{
-                                    color: "#f57f17", border: "1px solid #f57f17",
-                                    background: "transparent", fontSize: 11,
-                                  }}>
-                                    {ai.owner}
-                                  </button>
-                                )}
-                              </div>
-                            ))}
-                          </div>
-                        </>
-                      )}
-                    </div>
-
-                    {/* Card Footer */}
-                    <div className="card-footer">
-                      <button className="btn btn-ghost btn-sm" onClick={() => handleReject(action)}>Reject</button>
-                      <button className="btn btn-outline btn-sm" onClick={() => handleOpenEdit(action)}>Edit</button>
-                      <button
-                        className="btn btn-sm"
-                        style={{ background: "#137333", color: "#fff", gap: 4 }}
-                        onClick={() => handleApprove(action)}
-                      >
-                        <span className="material-symbols-outlined" style={{ fontSize: 15 }}>check</span>
-                        Approve & Send
-                      </button>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </section>
-
-            {/* ── Column 3: Focus Summary ── */}
-            <section style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-              <div className="section-header">
-                <h3 className="section-title">
-                  <span className="material-symbols-outlined" style={{ fontSize: 18 }}>center_focus_strong</span>
-                  Focus Summary
-                </h3>
-              </div>
-
-              {/* Knowledge Base — AI Query */}
-              <div className="card-sm" style={{ padding: 14 }}>
-                <h4 style={{
-                  fontSize: 11, fontWeight: 500, textTransform: "uppercase", letterSpacing: "0.06em",
-                  color: "var(--on-surface-variant)", marginBottom: 10,
-                  display: "flex", alignItems: "center", gap: 6,
-                }}>
-                  <span className="material-symbols-outlined" style={{ fontSize: 15 }}>database</span>
-                  Knowledge Base
-                </h4>
-                <div style={{ position: "relative" }}>
-                  <input
-                    type="text"
-                    className="input"
-                    placeholder="Ask AI about past decisions..."
-                    style={{ fontSize: 13, paddingRight: 40 }}
-                    value={kbQuery}
-                    onChange={e => setKbQuery(e.target.value)}
-                    onKeyDown={e => e.key === "Enter" && handleKbQuery()}
-                  />
-                  <button
-                    style={{
-                      position: "absolute", right: 8, top: "50%", transform: "translateY(-50%)",
-                      background: "none", border: "none", cursor: "pointer", color: "var(--secondary)",
-                      display: "flex", alignItems: "center",
-                    }}
-                    onClick={handleKbQuery}
-                    disabled={kbLoading}
-                  >
-                    <span className="material-symbols-outlined" style={{ fontSize: 18 }}>
-                      {kbLoading ? "sync" : "send"}
-                    </span>
-                  </button>
-                </div>
-                <div style={{ marginTop: 8, display: "flex", flexWrap: "wrap", gap: 4 }}>
-                  {['"Last week\'s OKR status"', '"Project Apollo risks"'].map((s, i) => (
-                    <span
-                      key={i}
-                      className="chip chip-inactive"
-                      style={{ fontSize: 11, cursor: "pointer" }}
-                      onClick={() => setKbQuery(s.replace(/"/g, ""))}
-                    >
-                      {s}
-                    </span>
-                  ))}
-                </div>
-                {kbResult && (
-                  <div style={{
-                    marginTop: 10, padding: 10, borderRadius: 4, fontSize: 12, lineHeight: 1.6,
-                    background: "var(--surface-container-low)", border: "1px solid var(--outline-variant)",
-                    color: "var(--on-surface)",
-                  }}>
-                    <span style={{ fontSize: 11, fontWeight: 600, color: "var(--secondary)", display: "block", marginBottom: 4 }}>
-                      ✦ AI Response
-                    </span>
-                    {kbResult}
-                  </div>
-                )}
-              </div>
-
-              {/* Overdue Actions */}
-              <div className="card">
-                <div className="card-header" style={{ background: "rgba(186,26,26,0.06)" }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                    <span className="material-symbols-outlined" style={{ fontSize: 18, color: "var(--error)" }}>
-                      assignment_late
-                    </span>
-                    <h4 style={{
-                      fontSize: 11, fontWeight: 600, textTransform: "uppercase",
-                      letterSpacing: "0.04em", color: "var(--error)",
-                    }}>
-                      Overdue Actions ({overdueItems.length})
-                    </h4>
-                  </div>
-                </div>
-                <div>
-                  {overdueItems.length === 0 ? (
-                    <div style={{ padding: "16px 14px", fontSize: 13, color: "#137333", display: "flex", alignItems: "center", gap: 6 }}>
-                      <span className="material-symbols-outlined fill-icon" style={{ fontSize: 16, color: "#137333" }}>check_circle</span>
-                      All caught up!
-                    </div>
-                  ) : overdueItems.map((item, i) => (
-                    <div key={item.id} style={{
-                      padding: "10px 14px",
-                      borderBottom: i < overdueItems.length - 1 ? "1px solid var(--outline-variant)" : "none",
-                      cursor: "pointer", transition: "background 0.12s",
-                      display: "flex", justifyContent: "space-between", alignItems: "center",
-                    }}
-                      onClick={() => handleMarkOverdone(item.id, item.task)}
-                    >
-                      <div>
-                        <p style={{ fontSize: 13, fontWeight: 500, color: "var(--on-surface)", lineHeight: 1.4 }}>
-                          {item.task}
-                        </p>
-                        <span style={{ fontSize: 11, color: "var(--error)", fontWeight: 500 }}>{item.overdue}</span>
-                      </div>
-                      <span className="material-symbols-outlined" style={{ fontSize: 16, color: "var(--outline)", flexShrink: 0 }}>check_circle</span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-
-              {/* AI Quick Insights */}
-              <div className="card-sm" style={{ padding: 14 }}>
-                <h4 style={{
-                  fontSize: 11, fontWeight: 500, textTransform: "uppercase", letterSpacing: "0.06em",
-                  color: "var(--on-surface-variant)", marginBottom: 10,
-                  display: "flex", alignItems: "center", gap: 6,
-                }}>
-                  <span className="material-symbols-outlined" style={{ fontSize: 15 }}>auto_awesome</span>
-                  AI Quick Insights
-                </h4>
-                <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                  {insights.map((insight, i) => (
-                    <div key={i} style={{
-                      display: "flex", alignItems: "flex-start", gap: 8, fontSize: 12,
-                      color: "var(--on-surface-variant)",
-                    }}>
-                      <span className="material-symbols-outlined" style={{
-                        fontSize: 15, flexShrink: 0, marginTop: 1,
-                        color: insight.type === "error" ? "var(--error)" : insight.type === "warning" ? "#f57f17" : "#137333",
-                      }}>
-                        {insight.icon}
-                      </span>
-                      <span>{insight.text}</span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            </section>
+                Start Interactive Demo
+              </button>
+              <span className="cta-note">No account required &nbsp;·&nbsp; Interactive walkthrough</span>
+            </div>
           </div>
-        </div>
+        </section>
+
+        {/* Footer */}
+        <footer className="footer">
+          <span className="footer-text">
+            © 2026 ExecuPilot AI · Enterprise Suite · All rights reserved
+          </span>
+        </footer>
       </div>
     </>
   );

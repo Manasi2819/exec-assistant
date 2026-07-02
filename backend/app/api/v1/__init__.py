@@ -17,7 +17,7 @@ router.include_router(transcript_routes.router, prefix="/agents/transcript", tag
 
 # Resource routes
 router.include_router(emails.router, prefix="/emails", tags=["Emails"])
-router.include_router(meetings.router, prefix="/meetings", tags=["Meetings"])
+router.include_router(meetings.router, prefix="/meetings", tags=["Meetings", "Calendar Intelligence"])
 router.include_router(action_items.router, prefix="/action-items", tags=["Action Items"])
 router.include_router(rag.router, prefix="/rag", tags=["RAG / Knowledge"])
 

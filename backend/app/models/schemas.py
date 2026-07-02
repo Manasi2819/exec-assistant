@@ -7,6 +7,37 @@ from pydantic import BaseModel, Field
 
 
 # ─────────────────────────────────────────────────────────────
+# Email Type Enum (18 types per spec)
+# ─────────────────────────────────────────────────────────────
+
+EmailType = Literal[
+    "meeting_request", "follow_up", "action_required", "approval_request",
+    "escalation", "client_query", "internal_update", "daily_project_update",
+    "weekly_report", "fyi", "reminder", "invoice_finance", "hr_communication",
+    "security_notification", "system_alert", "newsletter", "marketing_email", "spam",
+]
+
+PriorityLevel = Literal["urgent", "high", "medium", "low", "spam"]
+
+OrgType = Literal[
+    "internal", "client", "vendor", "partner", "recruiter",
+    "government", "unknown", "personal_email",
+]
+
+DomainTrust = Literal["trusted", "known_client", "known_vendor", "personal", "unknown", "suspicious"]
+
+RelationshipStrength = Literal[
+    "ceo", "direct_manager", "client", "reporting_manager",
+    "frequent_collaborator", "vendor", "unknown", "never_contacted",
+]
+
+NewSenderCategory = Literal[
+    "potential_client", "business_opportunity", "recruiter", "partner",
+    "vendor", "spam", "cold_marketing", "fraud_attempt", "unknown_but_important",
+]
+
+
+# ─────────────────────────────────────────────────────────────
 # Email / Intent schemas
 # ─────────────────────────────────────────────────────────────
 
@@ -29,6 +60,79 @@ class ExtractedIntent(BaseModel):
     confidence: float = Field(ge=0.0, le=1.0, default=1.0)
 
 
+class SenderProfile(BaseModel):
+    """Stage 4 — Sender trust & relationship analysis output."""
+    org_type: OrgType = "unknown"
+    domain: str = ""
+    domain_trust: DomainTrust = "unknown"
+    relationship_strength: RelationshipStrength = "unknown"
+    is_new_sender: bool = False
+    interaction_count: int = 0
+    last_interaction_days_ago: int = 999
+    new_sender_category: Optional[NewSenderCategory] = None
+    trust_score: float = Field(ge=0.0, le=1.0, default=0.5)
+
+
+class ExtractedEntities(BaseModel):
+    """Stage 3 — Structured entities extracted from the email body."""
+    meeting_date: Optional[str] = None
+    meeting_time: Optional[str] = None
+    meeting_link: Optional[str] = None
+    agenda: Optional[str] = None
+    participants: list[str] = Field(default_factory=list)
+    location: Optional[str] = None
+    preparation_required: list[str] = Field(default_factory=list)
+    documents_to_review: list[str] = Field(default_factory=list)
+    deadlines: list[str] = Field(default_factory=list)
+    action_items: list[str] = Field(default_factory=list)
+    approvals_required: list[str] = Field(default_factory=list)
+    project_name: Optional[str] = None
+    client_name: Optional[str] = None
+    departments_involved: list[str] = Field(default_factory=list)
+    risk_level: Optional[Literal["low", "medium", "high", "critical"]] = None
+    # ── Attendee escalation (client requests executive specifically in meeting) ───
+    attendee_requested: bool = False
+    attendee_requested_by: Optional[str] = None
+    attendee_meeting_time: Optional[str] = None
+    delegate_suggestions: list[str] = Field(default_factory=list)
+
+
+class EmailIntelligenceResult(BaseModel):
+    """Single unified output from the full 6-stage email intelligence pipeline."""
+    email_id: str
+    email_type: EmailType = "fyi"
+    sender_profile: SenderProfile = Field(default_factory=SenderProfile)
+    entities: ExtractedEntities = Field(default_factory=ExtractedEntities)
+    is_spam: bool = False
+    spam_signals: list[str] = Field(default_factory=list)
+    priority_level: PriorityLevel = "medium"
+    priority_score: float = Field(ge=0.0, le=100.0, default=50.0)
+    priority_reasoning: str = ""
+    one_line_summary: str = ""
+    confidence: float = Field(ge=0.0, le=1.0, default=0.8)
+    thread_id: str = ""
+    thread_group_key: Optional[str] = None
+
+
+class EmailThread(BaseModel):
+    """A grouped card for recurring daily/weekly project update threads."""
+    thread_group_key: str
+    project_name: str
+    thread_subject_pattern: str
+    email_count: int
+    last_updated: datetime
+    participant_list: list[str] = Field(default_factory=list)
+    overall_status: Literal["on_track", "at_risk", "blocked", "completed"] = "on_track"
+    completed_items: list[str] = Field(default_factory=list)
+    pending_items: list[str] = Field(default_factory=list)
+    blockers: list[str] = Field(default_factory=list)
+    executive_summary: str = ""
+    has_attendee_request: bool = False
+    attendee_request_details: Optional[str] = None
+    priority_level: PriorityLevel = "medium"
+    email_ids: list[str] = Field(default_factory=list)
+
+
 class EmailIngestRequest(BaseModel):
     """Raw email payload sent to POST /api/v1/agents/email/ingest"""
     message_id: str
@@ -49,6 +153,7 @@ class EmailIngestResponse(BaseModel):
     priority: str
     confidence: float
     intent: Optional[ExtractedIntent] = None
+    intelligence: Optional[EmailIntelligenceResult] = None
     message: str = "Email processed successfully"
 
 

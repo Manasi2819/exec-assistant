@@ -3,7 +3,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 
 const NAV_ITEMS = [
-  { href: "/", label: "Dashboard", icon: "dashboard" },
+  { href: "/dashboard", label: "Dashboard", icon: "dashboard" },
   { href: "/inbox", label: "Inbox", icon: "inbox", badge: 4 },
   { href: "/calendar", label: "Calendar", icon: "calendar_today" },
   { href: "/meetings/m1/brief", label: "Meeting Brief", icon: "description" },
@@ -35,11 +35,6 @@ export function Sidebar() {
         </div>
       </div>
 
-      {/* Primary CTA */}
-      <Link href="/meetings/m1/brief" className="sidebar-cta">
-        <span className="material-symbols-outlined" style={{ fontSize: 16 }}>add</span>
-        New Briefing
-      </Link>
 
       {/* Navigation */}
       <div className="sidebar-nav">
@@ -64,12 +59,6 @@ export function Sidebar() {
         })}
       </div>
 
-      {/* AI Status */}
-      <div className="ai-status" style={{ margin: "8px 12px" }}>
-        <div className="ai-status-dot" />
-        <span className="ai-status-text">AI Co-pilot Active</span>
-        <span className="ai-status-version">v2.4.1</span>
-      </div>
 
       {/* Footer */}
       <div className="sidebar-footer">

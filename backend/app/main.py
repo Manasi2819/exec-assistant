@@ -20,11 +20,11 @@ settings = get_settings()
 async def lifespan(app: FastAPI):
     """Startup / shutdown lifecycle."""
     provider = get_active_provider()
-    print(f"🚀 Executive AI Assistant starting...")
-    print(f"   LLM Provider: {provider.upper() if provider != 'none' else '⚠️  NONE — set OPENAI_API_KEY or GOOGLE_API_KEY'}")
+    print("[Startup] Executive AI Assistant starting...")
+    print(f"   LLM Provider: {provider.upper() if provider != 'none' else 'NONE -- set OPENAI_API_KEY or GOOGLE_API_KEY'}")
     print(f"   Environment: {settings.app_env}")
     yield
-    print("Executive AI Assistant shutting down.")
+    print("[Shutdown] Executive AI Assistant shutting down.")
 
 
 app = FastAPI(

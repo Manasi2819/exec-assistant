@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import "./globals.css";
-import { Sidebar } from "@/components/layout/Sidebar";
+import { AppShell } from "@/components/layout/AppShell";
 import { QueryProvider } from "@/components/providers/QueryProvider";
 
 export const metadata: Metadata = {
@@ -24,14 +24,10 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       </head>
       <body style={{ height: "100%" }}>
         <QueryProvider>
-          <div className="app-shell">
-            <Sidebar />
-            <div className="main-content">
-              {children}
-            </div>
-          </div>
+          <AppShell>{children}</AppShell>
         </QueryProvider>
       </body>
     </html>
   );
 }
+

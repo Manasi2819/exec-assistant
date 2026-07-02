@@ -1,5 +1,7 @@
 """Reply Agent API routes — POST /api/v1/agents/reply/draft"""
 from fastapi import APIRouter, HTTPException, Request
+from pydantic import BaseModel
+from typing import Optional
 from app.models.schemas import ReplyDraftRequest, ReplyDraftResponse, DraftApprovalRequest
 from app.agents.reply_agent import draft_reply
 import uuid
@@ -10,14 +12,44 @@ router = APIRouter()
 _drafts: dict[str, ReplyDraftResponse] = {}
 
 
+class EnrichedReplyRequest(BaseModel):
+    """Enhanced reply request with email intelligence context."""
+    email_id: str
+    thread_context: list[str] = []
+    user_name: str = "Executive"
+    # Optional enriched context from email intelligence pipeline
+    email_type: Optional[str] = None
+    sender: Optional[str] = None
+    subject: Optional[str] = None
+    sender_relationship: Optional[str] = None
+    priority_level: Optional[str] = None
+    attendee_requested: Optional[bool] = False
+    delegate_name: Optional[str] = None
+    thread_history: Optional[str] = None
+    rag_context: Optional[str] = None
+
+
 @router.post("/draft", response_model=ReplyDraftResponse)
-async def create_draft(request: Request, body: ReplyDraftRequest):
-    """Draft a reply for the given email. Returns pending draft awaiting human approval."""
+async def create_draft(request: Request, body: EnrichedReplyRequest):
+    """
+    Draft a context-aware reply for the given email.
+    Uses email type, sender relationship, and attendee status to generate
+    a tailored reply. Returns pending draft awaiting human approval.
+    """
+    email_body = "\n".join(body.thread_context)
+
     draft = await draft_reply(
-        sender="",
-        subject=f"Re: email {body.email_id}",
-        email_body="\n".join(body.thread_context),
+        sender=body.sender or "",
+        subject=body.subject or f"Re: email {body.email_id}",
+        email_body=email_body,
         user_name=body.user_name,
+        rag_context=body.rag_context or "",
+        email_type=body.email_type or "fyi",
+        sender_relationship=body.sender_relationship or "unknown",
+        priority_level=body.priority_level or "medium",
+        attendee_requested=body.attendee_requested or False,
+        delegate_name=body.delegate_name or "",
+        thread_history=body.thread_history or "",
     )
     _drafts[draft.draft_id] = draft
     return draft

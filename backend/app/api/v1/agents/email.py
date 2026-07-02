@@ -1,11 +1,17 @@
-"""Email Agent API routes — POST /api/v1/agents/email/ingest"""
+"""Email Agent API routes.
+POST /api/v1/agents/email/ingest   — Classify + extract intent (original pipeline)
+POST /api/v1/agents/email/analyze  — Full 6-stage intelligence pipeline
+"""
 from __future__ import annotations
 import uuid
 from fastapi import APIRouter, HTTPException, Request
 
-from app.models.schemas import EmailIngestRequest, EmailIngestResponse, ErrorResponse
+from app.models.schemas import (
+    EmailIngestRequest, EmailIngestResponse, ErrorResponse, EmailIntelligenceResult
+)
 from app.agents.email_agent import classify_email
 from app.agents.intent_agent import extract_intent
+from app.agents.email_intelligence_agent import analyze_email_intelligence
 
 router = APIRouter()
 
@@ -14,9 +20,7 @@ router = APIRouter()
 async def ingest_email(request: Request, body: EmailIngestRequest):
     """
     Classify an inbound email and extract structured intent entities.
-
-    This is the entry point for the Email Intelligence pipeline.
-    Returns the email category, priority, confidence, and extracted intent JSON.
+    Original pipeline — returns category, priority, confidence, intent.
     """
     trace_id = getattr(request.state, "trace_id", str(uuid.uuid4()))
 
@@ -74,6 +78,45 @@ async def ingest_email(request: Request, body: EmailIngestRequest):
             status_code=500,
             detail=ErrorResponse(
                 error_code="EMAIL_AGENT_ERROR",
+                message=str(exc),
+                trace_id=trace_id,
+                retryable=True,
+            ).model_dump(),
+        )
+
+
+@router.post("/analyze", response_model=EmailIntelligenceResult)
+async def analyze_email(request: Request, body: EmailIngestRequest):
+    """
+    Full 6-stage Email Intelligence Pipeline:
+    Stage 1 — Email Parsing
+    Stage 2 — 18-type classification
+    Stage 3 — Intelligent entity extraction (meetings, deadlines, action items, attendee escalation)
+    Stage 4 — Sender trust & relationship analysis
+    Stage 5 — Spam detection (multi-signal)
+    Stage 6 — Priority scoring (Urgent / High / Medium / Low / Spam)
+
+    Returns a complete EmailIntelligenceResult with all fields populated.
+    """
+    trace_id = getattr(request.state, "trace_id", str(uuid.uuid4()))
+
+    try:
+        result = await analyze_email_intelligence(
+            message_id=body.message_id,
+            thread_id=body.thread_id,
+            sender=body.sender,
+            subject=body.subject,
+            body=body.body,
+            timestamp=body.received_at.isoformat() if body.received_at else "",
+            cc=body.recipients,
+        )
+        return result
+
+    except Exception as exc:
+        raise HTTPException(
+            status_code=500,
+            detail=ErrorResponse(
+                error_code="EMAIL_INTELLIGENCE_ERROR",
                 message=str(exc),
                 trace_id=trace_id,
                 retryable=True,

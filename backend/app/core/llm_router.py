@@ -30,6 +30,7 @@ from app.core.config import get_settings
 
 class AgentTask(str, Enum):
     EMAIL_CLASSIFICATION = "email_classification"
+    EMAIL_INTELLIGENCE   = "email_intelligence"   # full 6-stage pipeline
     INTENT_EXTRACTION = "intent_extraction"
     CALENDAR = "calendar"
     MEETING_PREP = "meeting_prep"
@@ -44,6 +45,7 @@ class AgentTask(str, Enum):
 # Routing tables — OpenAI model names
 _OPENAI_ROUTING: dict[AgentTask, str] = {
     AgentTask.EMAIL_CLASSIFICATION: "gpt-4.1-mini",
+    AgentTask.EMAIL_INTELLIGENCE:   "gpt-4.1",
     AgentTask.INTENT_EXTRACTION:    "gpt-4.1",
     AgentTask.CALENDAR:             "gpt-4.1-mini",
     AgentTask.MEETING_PREP:         "gpt-4o",        # fallback if gpt-5 unavailable
@@ -58,6 +60,7 @@ _OPENAI_ROUTING: dict[AgentTask, str] = {
 # Routing tables — Google Gemini model names
 _GEMINI_ROUTING: dict[AgentTask, str] = {
     AgentTask.EMAIL_CLASSIFICATION: "gemini-2.5-flash",
+    AgentTask.EMAIL_INTELLIGENCE:   "gemini-2.5-flash",
     AgentTask.INTENT_EXTRACTION:    "gemini-2.5-flash",
     AgentTask.CALENDAR:             "gemini-2.5-flash",
     AgentTask.MEETING_PREP:         "gemini-2.5-flash",

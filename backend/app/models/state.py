@@ -13,6 +13,7 @@ from app.models.schemas import (
     TranscriptExtractionResult,
     MoMResponse,
     ActionItemExtracted,
+    EmailIntelligenceResult,
 )
 
 
@@ -33,6 +34,9 @@ class AgentState(TypedDict, total=False):
     email_priority: Optional[str]
     email_confidence: Optional[float]
     intent: Optional[ExtractedIntent]
+
+    # ── Full Email Intelligence pipeline output ───────────────
+    email_intelligence: Optional[EmailIntelligenceResult]
 
     # ── Calendar pipeline ─────────────────────────────────────
     calendar_result: Optional[CalendarProcessResponse]
